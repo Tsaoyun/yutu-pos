@@ -308,6 +308,24 @@ button:disabled {
   font-size: 22px;
 }
 
+.order-view-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.order-view-toggle button {
+  min-height: 48px;
+  background: #efe5d7;
+  font-weight: 900;
+}
+
+.order-view-toggle button.active {
+  background: #2f5f4a;
+  color: #fff;
+}
+
 .line-list {
   display: grid;
   align-content: start;
@@ -469,6 +487,47 @@ button:disabled {
   flex-wrap: wrap;
   color: #776b5f;
   font-size: 15px;
+}
+
+.production-list {
+  display: grid;
+  gap: 16px;
+  padding: 4px 2px 12px;
+}
+
+.production-list header {
+  padding: 12px;
+  background: #fff8ed;
+  border: 1px solid rgba(117, 88, 57, 0.14);
+  border-radius: 8px;
+}
+
+.production-list header strong {
+  font-size: 20px;
+}
+
+.production-group h3 {
+  margin: 0 0 8px;
+  color: #776b5f;
+  font-size: 16px;
+}
+
+.production-group ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.production-group li {
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid rgba(117, 88, 57, 0.12);
+  border-radius: 8px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .checkout {
@@ -769,6 +828,10 @@ button:disabled {
   .order-panel {
     position: static;
     min-height: 460px;
+  }
+
+  .production-group li {
+    font-size: 24px;
   }
 }
 

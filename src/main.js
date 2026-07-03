@@ -28,6 +28,7 @@ const initialState = {
   selectedCategoryId: categories[0].id,
   selectedOrderId: null,
   orderDetailMode: "active",
+  orderViewMode: "edit",
   activeView: "floor",
   historyDate: todayKey(),
   salesSort: "amount",
@@ -294,7 +295,7 @@ function replaceOrder(nextOrder) {
 function startOrder(seatId) {
   const existing = getOpenOrderBySeat(seatId);
   if (existing) {
-    setState({ selectedSeatId: seatId, selectedOrderId: existing.id, activeView: "floor", orderDetailMode: "active" });
+    setState({ selectedSeatId: seatId, selectedOrderId: existing.id, activeView: "floor", orderDetailMode: "active", orderViewMode: "edit" });
     return;
   }
 
@@ -306,7 +307,8 @@ function startOrder(seatId) {
     selectedSeatId: seatId,
     selectedOrderId: order.id,
     activeView: "floor",
-    orderDetailMode: "active"
+    orderDetailMode: "active",
+    orderViewMode: "edit"
   });
 }
 
@@ -751,6 +753,61 @@ function renderOrderItems(order, paid) {
     })
     .join("");
 }
+
+function productionLineLabel(item) {
+  if (item.type === "drink") {
+    return `${item.temperature || ""}${item.name}`;
+  }
+  return item.name;
+}
+
+function productionGroups(order) {
+  const groups = new Map();
+  sortOrderItems(order.items).forEach((item) => {
+    const group = typeLabels[item.type] || "其他";
+    const label = productionLineLabel(item);
+    const key = `${group}:${label}`;
+    const current = groups.get(key) || { group, label, quantity: 0 };
+    current.quantity += item.quantity;
+    groups.set(key, current);
+  });
+  return [...groups.values()].reduce((result, item) => {
+    if (!result[item.group]) result[item.group] = [];
+    result[item.group].push(item);
+    return result;
+  }, {});
+}
+
+function renderProductionList(order) {
+  const seat = getSeat(order.seatId);
+  const groups = productionGroups(order);
+  const orderedGroups = ["飲品", "甜品", "熟豆", "其他"];
+  return `
+    <section class="production-list">
+      <header>
+        <strong>${seat?.name || "未命名座位"}｜${order.people}人｜${timeLabel(order.createdAt)}</strong>
+      </header>
+      ${
+        orderedGroups
+          .filter((group) => groups[group]?.length)
+          .map(
+            (group) => `
+              <section class="production-group">
+                <h3>${group}</h3>
+                <ul>
+                  ${groups[group]
+                    .map((item) => `<li>${item.label}${item.quantity > 1 ? ` ×${item.quantity}` : ""}</li>`)
+                    .join("")}
+                </ul>
+              </section>
+            `
+          )
+          .join("") || `<div class="empty-note">尚無品項</div>`
+      }
+    </section>
+  `;
+}
+
 function renderOrder() {
   const order = getSelectedOrder();
   if (!order) {
@@ -760,6 +817,7 @@ function renderOrder() {
   const summary = calculateOrder(order);
   const paid = order.status === "paid";
   const readonlyHistory = paid && state.orderDetailMode === "history";
+  const showProductionList = state.orderViewMode === "production";
   if (paid && !order.items?.length) {
     console.warn("[YUTU POS] paid order detail has no items", { orderId: order.id, status: order.status });
   }
@@ -773,7 +831,11 @@ function renderOrder() {
         </div>
         <button class="ghost" data-action="floor">座位</button>
       </div>
-      <div class="line-list">${renderOrderItems(order, paid)}</div>
+      <div class="order-view-toggle">
+        <button class="${showProductionList ? "active" : ""}" data-action="order-view" data-value="production">出品清單</button>
+        <button class="${!showProductionList ? "active" : ""}" data-action="order-view" data-value="edit">編輯訂單</button>
+      </div>
+      <div class="line-list">${showProductionList ? renderProductionList(order) : renderOrderItems(order, paid)}</div>
       <div class="checkout">
         <div><span>總金額</span><strong>${money.format(summary.total)}</strong></div>
         <div><span>毛利</span><strong>${money.format(summary.profit)}</strong></div>
@@ -1061,6 +1123,7 @@ document.addEventListener("click", (event) => {
   if (action === "history-yesterday") setState({ historyDate: shiftDate(todayKey(), -1) });
   if (action === "history-today") setState({ historyDate: todayKey() });
   if (action === "toggle-sales-sort") setState({ salesSort: state.salesSort === "amount" ? "quantity" : "amount" });
+  if (action === "order-view") setState({ orderViewMode: value === "production" ? "production" : "edit" });
 });
 
 document.addEventListener("change", (event) => {
