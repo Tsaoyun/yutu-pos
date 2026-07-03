@@ -423,6 +423,7 @@ function updateLine(lineId, patch) {
 function removeLine(lineId) {
   const order = getSelectedOrder();
   if (!order || order.status !== "open") return;
+  if (!window.confirm("確定刪除此品項嗎？")) return;
   replaceOrder(removeOrderItem(order, lineId));
 }
 
@@ -698,29 +699,51 @@ function renderOrderItems(order, paid) {
         <article class="line ${item.served ? "served" : ""}">
           <div class="line-title">
             <strong>${item.name}</strong>
-            <span>${optionParts.length ? `${optionParts.join(" · ")} · ` : ""}${money.format(item.price)} × ${item.quantity} = ${money.format(subtotal)}</span>
+            <span>${money.format(item.price)} × ${item.quantity} = ${money.format(subtotal)}</span>
           </div>
           ${
             readonly
-              ? `<div class="line-readonly"><span>數量 ${item.quantity}</span><span>單價 ${money.format(item.price)}</span><span>小計 ${money.format(subtotal)}</span></div>`
-              : `<div class="line-controls">
-                  <button data-action="qty" data-id="${item.lineId}" data-value="${item.quantity - 1}">−</button>
-                  <span>${item.quantity}</span>
-                  <button data-action="qty" data-id="${item.lineId}" data-value="${item.quantity + 1}">＋</button>
+              ? `<div class="line-readonly">
+                  <span>數量 ${item.quantity}</span>
+                  ${optionParts.map((part) => `<span>${part}</span>`).join("")}
+                  <span>單價 ${money.format(item.price)}</span>
+                  <span>小計 ${money.format(subtotal)}</span>
+                </div>`
+              : `<div class="line-edit">
+                  <section class="line-section">
+                    <span class="line-section-label">數量</span>
+                    <div class="quantity-control">
+                      <button data-action="qty" data-id="${item.lineId}" data-value="${item.quantity - 1}" aria-label="減少數量">−</button>
+                      <strong>${item.quantity}</strong>
+                      <button data-action="qty" data-id="${item.lineId}" data-value="${item.quantity + 1}" aria-label="增加數量">＋</button>
+                    </div>
+                  </section>
                   ${
                     requiresTemperature
-                      ? `<button class="${item.temperature === "熱" ? "active" : ""}" data-action="temp" data-id="${item.lineId}" data-value="熱">熱</button>
-                         <button class="${item.temperature === "冰" ? "active" : ""}" data-action="temp" data-id="${item.lineId}" data-value="冰">冰</button>`
+                      ? `<section class="line-section">
+                          <span class="line-section-label">溫度</span>
+                          <div class="segmented-control">
+                            <button class="${item.temperature === "熱" ? "active" : ""}" data-action="temp" data-id="${item.lineId}" data-value="熱">熱</button>
+                            <button class="${item.temperature === "冰" ? "active" : ""}" data-action="temp" data-id="${item.lineId}" data-value="冰">冰</button>
+                          </div>
+                        </section>`
                       : ""
                   }
                   ${
                     requiresServiceType
-                      ? `<button class="${item.serviceType === "內用" ? "active" : ""}" data-action="service" data-id="${item.lineId}" data-value="內用">內</button>
-                         <button class="${item.serviceType === "外帶" ? "active" : ""}" data-action="service" data-id="${item.lineId}" data-value="外帶">外</button>`
+                      ? `<section class="line-section">
+                          <span class="line-section-label">用餐</span>
+                          <div class="segmented-control">
+                            <button class="${item.serviceType === "內用" ? "active" : ""}" data-action="service" data-id="${item.lineId}" data-value="內用">內用</button>
+                            <button class="${item.serviceType === "外帶" ? "active" : ""}" data-action="service" data-id="${item.lineId}" data-value="外帶">外帶</button>
+                          </div>
+                        </section>`
                       : ""
                   }
-                  <button class="served-toggle ${item.served ? "active" : ""}" data-action="served" data-id="${item.lineId}">${item.served ? "已出" : "出單"}</button>
-                  <button class="danger" data-action="remove" data-id="${item.lineId}">刪</button>
+                  <section class="line-secondary-actions">
+                    <button class="served-toggle ${item.served ? "active" : ""}" data-action="served" data-id="${item.lineId}">${item.served ? "已出" : "出單"}</button>
+                    <button class="danger" data-action="remove" data-id="${item.lineId}">刪除</button>
+                  </section>
                 </div>`
           }
         </article>
@@ -728,7 +751,6 @@ function renderOrderItems(order, paid) {
     })
     .join("");
 }
-
 function renderOrder() {
   const order = getSelectedOrder();
   if (!order) {
@@ -737,6 +759,7 @@ function renderOrder() {
   const seat = getSeat(order.seatId);
   const summary = calculateOrder(order);
   const paid = order.status === "paid";
+  const readonlyHistory = paid && state.orderDetailMode === "history";
   if (paid && !order.items?.length) {
     console.warn("[YUTU POS] paid order detail has no items", { orderId: order.id, status: order.status });
   }
@@ -756,9 +779,11 @@ function renderOrder() {
         <div><span>毛利</span><strong>${money.format(summary.profit)}</strong></div>
         ${
           paid
-            ? `<button class="paid" disabled>已結帳 · 現金</button>
-               <button class="secondary" data-action="edit-paid" data-id="${order.id}">編輯訂單</button>
-               <button class="secondary danger-action" data-action="delete-order" data-id="${order.id}">刪除紀錄</button>`
+            ? readonlyHistory
+              ? `<button class="paid" disabled>已結帳 · 現金</button>`
+              : `<button class="paid" disabled>已結帳 · 現金</button>
+                 <button class="secondary" data-action="edit-paid" data-id="${order.id}">編輯訂單</button>
+                 <button class="secondary danger-action" data-action="delete-order" data-id="${order.id}">刪除紀錄</button>`
             : `<button class="primary" data-action="checkout" ${order.items.length === 0 ? "disabled" : ""}>現金結帳</button>
                <button class="secondary danger-action" data-action="cancel-order">取消客人</button>`
         }

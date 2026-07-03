@@ -351,6 +351,91 @@ button:disabled {
   font-size: 17px;
 }
 
+.line-edit {
+  display: grid;
+  gap: 12px;
+}
+
+.line-section {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(117, 88, 57, 0.1);
+}
+
+.line-section-label {
+  color: #776b5f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.quantity-control,
+.segmented-control {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+}
+
+.quantity-control {
+  grid-template-columns: minmax(48px, 64px) minmax(48px, 72px) minmax(48px, 64px);
+}
+
+.quantity-control button,
+.segmented-control button,
+.line-secondary-actions button {
+  min-height: 48px;
+}
+
+.quantity-control button,
+.segmented-control button {
+  background: #efe5d7;
+}
+
+.quantity-control strong {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  background: #fff8ed;
+  border: 1px solid rgba(117, 88, 57, 0.14);
+  border-radius: 8px;
+  font-size: 18px;
+}
+
+.segmented-control {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmented-control button.active {
+  background: #2f5f4a;
+  color: #fff;
+}
+
+.line-secondary-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(117, 88, 57, 0.1);
+}
+
+.line-secondary-actions .served-toggle {
+  min-width: 72px;
+  background: #eadfcf;
+  color: #5f5144;
+  font-size: 15px;
+}
+
+.line-secondary-actions .served-toggle.active {
+  background: #dfe8dd;
+  color: #49664f;
+}
+
+.line-secondary-actions .danger {
+  min-width: 82px;
+  background: #f3d8d1;
+  color: #813724;
+}
+
 .line-controls {
   display: grid;
   grid-template-columns: 42px 34px 42px repeat(5, 42px) 52px;
@@ -713,6 +798,26 @@ button:disabled {
 
   .line-controls {
     grid-template-columns: repeat(4, 1fr);
+  }
+
+  .line-edit {
+    gap: 10px;
+  }
+
+  .quantity-control {
+    grid-template-columns: 56px minmax(56px, 1fr) 56px;
+  }
+
+  .segmented-control {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .line-secondary-actions {
+    justify-content: stretch;
+  }
+
+  .line-secondary-actions button {
+    flex: 1;
   }
 
   .product-form,
