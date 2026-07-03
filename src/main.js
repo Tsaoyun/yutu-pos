@@ -28,7 +28,7 @@ const initialState = {
   selectedCategoryId: categories[0].id,
   selectedOrderId: null,
   orderDetailMode: "active",
-  orderViewMode: "edit",
+  orderViewMode: "production",
   activeView: "floor",
   historyDate: todayKey(),
   salesSort: "amount",
@@ -74,19 +74,28 @@ function normalizeState(savedState) {
     ? savedState.orders.map((order) => ({
         ...order,
         items: Array.isArray(order.items)
-          ? order.items.map((item) => ({
-              ...item,
-              quantity: Number(item.quantity) || 1,
-              price: Number(item.price) || 0,
-              cost: Number(item.cost) || 0,
-              profit: item.profit ?? (Number(item.price) || 0) - (Number(item.cost) || 0),
-              temperature: item.temperature === "冰" ? "冰" : "熱",
-              serviceType: item.serviceType === "外帶" ? "外帶" : "內用",
-              requiresTemperature: item.requiresTemperature ?? item.type === "drink",
-              requiresServiceType: item.requiresServiceType ?? item.type !== "retail",
-              served: Boolean(item.served),
-              note: item.note || ""
-            }))
+          ? order.items.map((item) => {
+              const price = Number(item.price) || 0;
+              const basePrice = Number(item.basePrice ?? price) || 0;
+              const effectivePrice = Number(item.effectivePrice ?? price) || 0;
+              const normalized = {
+                ...item,
+                quantity: Number(item.quantity) || 1,
+                basePrice,
+                effectivePrice,
+                iceExtra: Number(item.iceExtra ?? effectivePrice - basePrice) || 0,
+                price: effectivePrice,
+                cost: Number(item.cost) || 0,
+                profit: effectivePrice - (Number(item.cost) || 0),
+                temperature: item.temperature === "冰" ? "冰" : "熱",
+                serviceType: item.serviceType === "外帶" ? "外帶" : "內用",
+                requiresTemperature: item.requiresTemperature ?? item.type === "drink",
+                requiresServiceType: item.requiresServiceType ?? item.type !== "retail",
+                served: Boolean(item.served),
+                note: item.note || ""
+              };
+              return normalized;
+            })
           : []
       }))
     : [];
@@ -222,7 +231,8 @@ function salesSummaryForDate(dateKey) {
   const rows = new Map();
   paidOrdersForDate(dateKey).forEach((order) => {
     order.items.forEach((item) => {
-      const key = `${item.productId || item.name}-${item.name}-${item.price}-${item.cost}`;
+      const price = Number(item.effectivePrice ?? item.price) || 0;
+      const key = `${item.productId || item.name}-${item.name}-${price}-${item.cost}`;
       const current =
         rows.get(key) ||
         {
@@ -234,9 +244,9 @@ function salesSummaryForDate(dateKey) {
           profit: 0
         };
       current.quantity += item.quantity;
-      current.amount += item.price * item.quantity;
+      current.amount += price * item.quantity;
       current.cost += item.cost * item.quantity;
-      current.profit += (item.price - item.cost) * item.quantity;
+      current.profit += (price - item.cost) * item.quantity;
       rows.set(key, current);
     });
   });
@@ -295,7 +305,7 @@ function replaceOrder(nextOrder) {
 function startOrder(seatId) {
   const existing = getOpenOrderBySeat(seatId);
   if (existing) {
-    setState({ selectedSeatId: seatId, selectedOrderId: existing.id, activeView: "floor", orderDetailMode: "active", orderViewMode: "edit" });
+    setState({ selectedSeatId: seatId, selectedOrderId: existing.id, activeView: "floor", orderDetailMode: "active", orderViewMode: "production" });
     return;
   }
 
@@ -308,7 +318,7 @@ function startOrder(seatId) {
     selectedOrderId: order.id,
     activeView: "floor",
     orderDetailMode: "active",
-    orderViewMode: "edit"
+    orderViewMode: "production"
   });
 }
 
@@ -692,7 +702,8 @@ function renderOrderItems(order, paid) {
         requiresTemperature && item.temperature ? item.temperature : "",
         requiresServiceType && item.serviceType ? item.serviceType : ""
       ].filter(Boolean);
-      const subtotal = item.price * item.quantity;
+      const unitPrice = Number(item.effectivePrice ?? item.price) || 0;
+      const subtotal = unitPrice * item.quantity;
       const groupHeader =
         item.type !== lastType ? `<div class="line-group">${typeLabels[item.type] || "其他"}</div>` : "";
       lastType = item.type;
@@ -701,15 +712,17 @@ function renderOrderItems(order, paid) {
         <article class="line ${item.served ? "served" : ""}">
           <div class="line-title">
             <strong>${item.name}</strong>
-            <span>${money.format(item.price)} × ${item.quantity} = ${money.format(subtotal)}</span>
+            <span>${money.format(unitPrice)} × ${item.quantity} = ${money.format(subtotal)}</span>
           </div>
           ${
             readonly
               ? `<div class="line-readonly">
                   <span>數量 ${item.quantity}</span>
                   ${optionParts.map((part) => `<span>${part}</span>`).join("")}
-                  <span>單價 ${money.format(item.price)}</span>
+                  <span>單價 ${money.format(unitPrice)}</span>
+                  ${item.iceExtra ? `<span>冰飲加價 ${money.format(item.iceExtra)}</span>` : ""}
                   <span>小計 ${money.format(subtotal)}</span>
+                  <span>${item.served ? "已出" : "未出"}</span>
                 </div>`
               : `<div class="line-edit">
                   <section class="line-section">
@@ -743,7 +756,6 @@ function renderOrderItems(order, paid) {
                       : ""
                   }
                   <section class="line-secondary-actions">
-                    <button class="served-toggle ${item.served ? "active" : ""}" data-action="served" data-id="${item.lineId}">${item.served ? "已出" : "出單"}</button>
                     <button class="danger" data-action="remove" data-id="${item.lineId}">刪除</button>
                   </section>
                 </div>`
@@ -766,21 +778,17 @@ function productionGroups(order) {
   sortOrderItems(order.items).forEach((item) => {
     const group = typeLabels[item.type] || "其他";
     const label = productionLineLabel(item);
-    const key = `${group}:${label}`;
-    const current = groups.get(key) || { group, label, quantity: 0 };
-    current.quantity += item.quantity;
-    groups.set(key, current);
+    const current = groups.get(group) || [];
+    current.push({ ...item, group, label });
+    groups.set(group, current);
   });
-  return [...groups.values()].reduce((result, item) => {
-    if (!result[item.group]) result[item.group] = [];
-    result[item.group].push(item);
-    return result;
-  }, {});
+  return Object.fromEntries(groups);
 }
 
 function renderProductionList(order) {
   const seat = getSeat(order.seatId);
   const groups = productionGroups(order);
+  const paid = order.status === "paid";
   const orderedGroups = ["飲品", "甜品", "熟豆", "其他"];
   return `
     <section class="production-list">
@@ -796,7 +804,17 @@ function renderProductionList(order) {
                 <h3>${group}</h3>
                 <ul>
                   ${groups[group]
-                    .map((item) => `<li>${item.label}${item.quantity > 1 ? ` ×${item.quantity}` : ""}</li>`)
+                    .map(
+                      (item) => `
+                        <li>
+                          <button class="production-item ${item.served ? "served" : ""}" data-action="served" data-id="${item.lineId}" ${paid ? "disabled" : ""}>
+                            <span class="production-check">${item.served ? "✓" : ""}</span>
+                            <span class="production-name">${item.label}${item.quantity > 1 ? ` ×${item.quantity}` : ""}</span>
+                            ${item.served ? `<span class="production-status">已出</span>` : ""}
+                          </button>
+                        </li>
+                      `
+                    )
                     .join("")}
                 </ul>
               </section>

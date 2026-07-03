@@ -9,6 +9,26 @@ function createLineId() {
   return `line-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+const POUROVER_ICE_EXTRA = 10;
+
+function isPourover(category) {
+  return category === "pourover" || category === "手沖";
+}
+
+export function priceFieldsForItem(item) {
+  const basePrice = Number(item.basePrice ?? item.price ?? item.effectivePrice) || 0;
+  const iceExtra = isPourover(item.category) && item.temperature === "冰" ? POUROVER_ICE_EXTRA : 0;
+  const effectivePrice = basePrice + iceExtra;
+
+  return {
+    basePrice,
+    effectivePrice,
+    iceExtra,
+    price: effectivePrice,
+    profit: effectivePrice - (Number(item.cost) || 0)
+  };
+}
+
 export function createOrder({ seatId, people }) {
   const now = new Date();
 
@@ -27,6 +47,14 @@ export function createOrder({ seatId, people }) {
 export function addOrderItem(order, product, options = {}) {
   const requiresTemperature = product.requiresTemperature ?? product.type === "drink";
   const requiresServiceType = product.requiresServiceType ?? product.type !== "retail";
+  const temperature = requiresTemperature ? options.temperature || "熱" : "";
+  const baseItem = {
+    category: product.category,
+    temperature,
+    basePrice: product.price,
+    cost: product.cost
+  };
+  const priceFields = priceFieldsForItem(baseItem);
 
   return {
     ...order,
@@ -41,11 +69,14 @@ export function addOrderItem(order, product, options = {}) {
         quantity: 1,
         requiresTemperature,
         requiresServiceType,
-        temperature: requiresTemperature ? options.temperature || "熱" : "",
+        temperature,
         serviceType: requiresServiceType ? options.serviceType || "內用" : "",
-        price: product.price,
+        basePrice: priceFields.basePrice,
+        effectivePrice: priceFields.effectivePrice,
+        iceExtra: priceFields.iceExtra,
+        price: priceFields.price,
         cost: product.cost,
-        profit: product.price - product.cost,
+        profit: priceFields.profit,
         served: false,
         note: options.note || ""
       }
@@ -56,7 +87,11 @@ export function addOrderItem(order, product, options = {}) {
 export function updateOrderItem(order, lineId, patch) {
   return {
     ...order,
-    items: order.items.map((item) => (item.lineId === lineId ? { ...item, ...patch } : item))
+    items: order.items.map((item) => {
+      if (item.lineId !== lineId) return item;
+      const next = { ...item, ...patch };
+      return { ...next, ...priceFieldsForItem(next) };
+    })
   };
 }
 
@@ -71,7 +106,7 @@ export function calculateOrder(order) {
   return order.items.reduce(
     (summary, item) => {
       const quantity = Number(item.quantity) || 0;
-      const price = Number(item.price) || 0;
+      const price = Number(item.effectivePrice ?? item.price) || 0;
       const cost = Number(item.cost) || 0;
 
       summary.total += price * quantity;
