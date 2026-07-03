@@ -712,7 +712,12 @@ function renderOrderItems(order, paid) {
         <article class="line ${item.served ? "served" : ""}">
           <div class="line-title">
             <strong>${item.name}</strong>
-            <span>${money.format(unitPrice)} × ${item.quantity} = ${money.format(subtotal)}</span>
+            <span>${money.format(subtotal)}</span>
+          </div>
+          <div class="line-meta">
+            <span>${optionParts.join("｜") || "一般"}</span>
+            <span>×${item.quantity}</span>
+            ${item.iceExtra ? `<span>冰飲 +${money.format(item.iceExtra)}</span>` : ""}
           </div>
           ${
             readonly

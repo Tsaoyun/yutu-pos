@@ -312,16 +312,16 @@ button:disabled {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
-  min-height: 44px;
-  margin-bottom: 10px;
-  padding: 4px;
+  min-height: 40px;
+  margin-bottom: 8px;
+  padding: 3px;
   background: #f2eadf;
   border: 1px solid rgba(117, 88, 57, 0.12);
   border-radius: 8px;
 }
 
 .order-view-toggle button {
-  min-height: 36px;
+  min-height: 32px;
   background: transparent;
   font-weight: 900;
   font-size: 15px;
@@ -335,13 +335,13 @@ button:disabled {
 .line-list {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 8px;
   overflow: auto;
   padding-right: 2px;
 }
 
 .line {
-  padding: 12px;
+  padding: 10px;
   background: #fff;
   border: 1px solid rgba(117, 88, 57, 0.14);
   border-radius: 8px;
@@ -367,62 +367,88 @@ button:disabled {
 .line-title {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 3px;
 }
 
 .line-title strong {
+  min-width: 0;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.line-title span {
+  flex: 0 0 auto;
+  color: #2b241c;
   font-size: 17px;
+  font-weight: 900;
+}
+
+.line-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  color: #776b5f;
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .line-edit {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(98px, 0.9fr) minmax(108px, 1fr) minmax(124px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
 }
 
 .line-section {
   display: grid;
-  gap: 6px;
-  padding-top: 10px;
+  gap: 4px;
+  padding-top: 0;
   border-top: 1px solid rgba(117, 88, 57, 0.1);
 }
 
 .line-section-label {
   color: #776b5f;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .quantity-control,
 .segmented-control {
   display: grid;
-  gap: 8px;
+  gap: 3px;
   align-items: center;
+  padding: 3px;
+  background: #f2eadf;
+  border: 1px solid rgba(117, 88, 57, 0.12);
+  border-radius: 8px;
 }
 
 .quantity-control {
-  grid-template-columns: minmax(48px, 64px) minmax(48px, 72px) minmax(48px, 64px);
+  grid-template-columns: 34px minmax(30px, 1fr) 34px;
 }
 
 .quantity-control button,
 .segmented-control button,
 .line-secondary-actions button {
-  min-height: 48px;
+  min-height: 36px;
 }
 
 .quantity-control button,
 .segmented-control button {
-  background: #efe5d7;
+  background: transparent;
+  font-weight: 900;
 }
 
 .quantity-control strong {
   display: grid;
   place-items: center;
-  min-height: 48px;
-  background: #fff8ed;
-  border: 1px solid rgba(117, 88, 57, 0.14);
-  border-radius: 8px;
-  font-size: 18px;
+  min-height: 36px;
+  background: #fffaf2;
+  border-radius: 6px;
+  font-size: 17px;
 }
 
 .segmented-control {
@@ -432,20 +458,23 @@ button:disabled {
 .segmented-control button.active {
   background: #2f5f4a;
   color: #fff;
+  border-radius: 6px;
 }
 
 .line-secondary-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 0;
+  padding-top: 18px;
   border-top: 1px solid rgba(117, 88, 57, 0.1);
 }
 
 .line-secondary-actions .danger {
-  min-width: 82px;
+  min-width: 56px;
   background: #f3d8d1;
   color: #813724;
+  font-size: 14px;
+  font-weight: 900;
 }
 
 .line-controls {
@@ -856,6 +885,10 @@ button:disabled {
     min-height: 460px;
   }
 
+  .line-edit {
+    grid-template-columns: minmax(98px, 0.9fr) minmax(108px, 1fr) minmax(124px, 1fr) auto;
+  }
+
   .production-item {
     font-size: 24px;
   }
@@ -883,7 +916,7 @@ button:disabled {
   }
 
   .order-view-toggle {
-    min-height: 44px;
+    min-height: 40px;
     margin-bottom: 8px;
   }
 
@@ -896,7 +929,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .line-title,
   .topbar {
     align-items: flex-start;
     flex-direction: column;
@@ -940,11 +972,12 @@ button:disabled {
   }
 
   .line-edit {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }
 
   .quantity-control {
-    grid-template-columns: 56px minmax(56px, 1fr) 56px;
+    grid-template-columns: 34px minmax(30px, 1fr) 34px;
   }
 
   .segmented-control {
@@ -953,6 +986,7 @@ button:disabled {
 
   .line-secondary-actions {
     justify-content: stretch;
+    padding-top: 16px;
   }
 
   .line-secondary-actions button {
