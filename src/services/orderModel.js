@@ -38,6 +38,7 @@ export function createOrder({ seatId, people }) {
     seatId,
     people,
     items: [],
+    activityLog: [],
     status: "open",
     paymentMethod: null,
     checkedOutAt: null
@@ -48,6 +49,7 @@ export function addOrderItem(order, product, options = {}) {
   const requiresTemperature = product.requiresTemperature ?? product.type === "drink";
   const requiresServiceType = product.requiresServiceType ?? product.type !== "retail";
   const temperature = requiresTemperature ? options.temperature || "熱" : "";
+  const serviceType = options.serviceType || (order.seatId === "takeout" ? "外帶" : "內用");
   const baseItem = {
     category: product.category,
     temperature,
@@ -64,13 +66,14 @@ export function addOrderItem(order, product, options = {}) {
         lineId: createLineId(),
         productId: product.id,
         name: product.name,
+        variantName: options.variantName || "",
         category: product.category,
         type: product.type,
         quantity: 1,
         requiresTemperature,
         requiresServiceType,
         temperature,
-        serviceType: requiresServiceType ? options.serviceType || "內用" : "",
+        serviceType: requiresServiceType ? serviceType : "",
         basePrice: priceFields.basePrice,
         effectivePrice: priceFields.effectivePrice,
         iceExtra: priceFields.iceExtra,
@@ -121,10 +124,12 @@ export function calculateOrder(order) {
 }
 
 export function checkoutOrder(order, paymentMethod = "cash") {
+  const checkedOutAt = new Date().toISOString();
   return {
     ...order,
     status: "paid",
     paymentMethod,
-    checkedOutAt: new Date().toISOString()
+    checkedOutAt,
+    activityLog: [...(Array.isArray(order.activityLog) ? order.activityLog : []), { type: "checkout", at: checkedOutAt }]
   };
 }
