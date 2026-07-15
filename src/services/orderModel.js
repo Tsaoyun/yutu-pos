@@ -9,15 +9,25 @@ function createLineId() {
   return `line-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-const POUROVER_ICE_EXTRA = 10;
+function supportsTemperature(productOrItem) {
+  return Boolean(productOrItem.supportsHot || productOrItem.supportsIce || productOrItem.requiresTemperature);
+}
 
-function isPourover(category) {
-  return category === "pourover" || category === "手沖";
+function defaultTemperature(product, requestedTemperature = "") {
+  if (!supportsTemperature(product)) return "";
+  if (requestedTemperature === "冰" && product.supportsIce !== false) return "冰";
+  if (requestedTemperature === "熱" && product.supportsHot !== false) return "熱";
+  if (product.supportsHot !== false) return "熱";
+  if (product.supportsIce !== false) return "冰";
+  return "";
 }
 
 export function priceFieldsForItem(item) {
   const basePrice = Number(item.basePrice ?? item.price ?? item.effectivePrice) || 0;
-  const iceExtra = isPourover(item.category) && item.temperature === "冰" ? POUROVER_ICE_EXTRA : 0;
+  const iceExtra =
+    item.temperature === "冰" && supportsTemperature(item)
+      ? Number(item.iceExtraPrice ?? item.iceExtra ?? 0) || 0
+      : 0;
   const effectivePrice = basePrice + iceExtra;
 
   return {
@@ -37,22 +47,28 @@ export function createOrder({ seatId, people }) {
     createdAt: now.toISOString(),
     seatId,
     people,
+    linkedSeatIds: [],
     items: [],
     activityLog: [],
     status: "open",
     paymentMethod: null,
-    checkedOutAt: null
+    checkedOutAt: null,
+    customerSource: "not_asked",
+    customerSourceNote: ""
   };
 }
 
 export function addOrderItem(order, product, options = {}) {
-  const requiresTemperature = product.requiresTemperature ?? product.type === "drink";
-  const requiresServiceType = product.requiresServiceType ?? product.type !== "retail";
-  const temperature = requiresTemperature ? options.temperature || "熱" : "";
+  const requiresTemperature = supportsTemperature(product);
+  const requiresServiceType = product.requiresServiceType ?? product.supportsTakeout !== false;
+  const temperature = defaultTemperature(product, options.temperature);
   const serviceType = options.serviceType || (order.seatId === "takeout" ? "外帶" : "內用");
   const baseItem = {
     category: product.category,
     temperature,
+    supportsHot: product.supportsHot !== false,
+    supportsIce: product.supportsIce !== false,
+    iceExtraPrice: Number(product.iceExtraPrice) || 0,
     basePrice: product.price,
     cost: product.cost
   };
@@ -72,8 +88,12 @@ export function addOrderItem(order, product, options = {}) {
         quantity: 1,
         requiresTemperature,
         requiresServiceType,
+        supportsHot: product.supportsHot !== false,
+        supportsIce: product.supportsIce !== false,
+        supportsTakeout: product.supportsTakeout !== false,
         temperature,
         serviceType: requiresServiceType ? serviceType : "",
+        iceExtraPrice: Number(product.iceExtraPrice) || 0,
         basePrice: priceFields.basePrice,
         effectivePrice: priceFields.effectivePrice,
         iceExtra: priceFields.iceExtra,

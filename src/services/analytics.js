@@ -1,3 +1,6 @@
+import { buildCustomerSourceSummary } from "./customerSource.js";
+import { summarizeBusinessEvents } from "./businessEvents.js";
+
 function toDateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -248,6 +251,11 @@ export function buildAnalyticsDashboard(orders, options = {}) {
     categorySummary: buildCategorySummary(paidOrders, options),
     temperatureSummary: buildTemperatureSummary(paidOrders),
     hourlySummary: buildHourlySummary(paidOrders),
-    seatSummary: buildSeatSummary(paidOrders, options)
+    seatSummary: buildSeatSummary(paidOrders, options),
+    customerSourceSummary: buildCustomerSourceSummary(paidOrders, options),
+    businessEventSummary: summarizeBusinessEvents(options.businessEvents, {
+      startDate: options.startDate,
+      endDate: options.endDate
+    })
   };
 }
