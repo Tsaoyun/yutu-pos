@@ -1,3 +1,6 @@
+import { summarizeBusinessEvents } from "./businessEvents.js";
+import { buildCustomerSourceSummary } from "./customerSource.js";
+
 function toDateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -32,12 +35,12 @@ function marginRate(profit, revenue) {
 }
 
 function categoryLabel(category, labels = {}) {
-  return labels[category] || category || "其他";
+  return labels[category] || category || "未分類";
 }
 
 function seatLabel(seatId, labels = {}) {
   if (seatId === "takeout") return labels.takeout || "外帶";
-  return labels[seatId] || seatId || "未命名座位";
+  return labels[seatId] || seatId || "未知座位";
 }
 
 function ensureCategoryRows(labels = {}) {
@@ -239,15 +242,33 @@ export function buildSeatSummary(orders, options = {}) {
 
 export function buildAnalyticsDashboard(orders, options = {}) {
   const paidOrders = filterPaidOrdersByDateRange(orders, options.startDate, options.endDate);
+  const overview = buildOverviewMetrics(paidOrders);
+  const productRanking = buildProductRanking(paidOrders, options);
+  const categorySummary = buildCategorySummary(paidOrders, options);
+  const temperatureSummary = buildTemperatureSummary(paidOrders);
+  const hourlySummary = buildHourlySummary(paidOrders);
+  const seatSummary = buildSeatSummary(paidOrders, options);
+  const customerSourceSummary = buildCustomerSourceSummary(paidOrders, options);
+  const businessEventSummary = summarizeBusinessEvents(options.businessEvents || [], {
+    startDate: options.startDate,
+    endDate: options.endDate
+  });
+
   return {
+    schemaVersion: 1,
     startDate: options.startDate,
     endDate: options.endDate,
     paidOrders,
-    overview: buildOverviewMetrics(paidOrders),
-    productRanking: buildProductRanking(paidOrders, options),
-    categorySummary: buildCategorySummary(paidOrders, options),
-    temperatureSummary: buildTemperatureSummary(paidOrders),
-    hourlySummary: buildHourlySummary(paidOrders),
-    seatSummary: buildSeatSummary(paidOrders, options)
+    overview,
+    salesSummary: overview,
+    productRanking,
+    productSummary: productRanking,
+    categorySummary,
+    temperatureSummary,
+    hourlySummary,
+    seatSummary,
+    customerSourceSummary,
+    businessEventSummary,
+    comparisonSummary: null
   };
 }
