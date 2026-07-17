@@ -179,6 +179,7 @@ button:disabled {
   grid-template-columns: minmax(0, 0.59fr) minmax(360px, 0.41fr);
   gap: 16px;
   align-items: start;
+  min-height: 0;
 }
 
 .section-title,
@@ -685,23 +686,28 @@ button:disabled {
 .order-panel {
   position: sticky;
   top: 12px;
-  min-height: min(560px, calc(100vh - 260px));
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(220px, 1fr) auto;
+  min-height: 0;
+  max-height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .task-column {
   position: sticky;
   top: 12px;
   display: grid;
-  grid-template-rows: minmax(150px, 28vh) minmax(0, 1fr);
+  grid-template-rows: minmax(96px, 16dvh) minmax(0, 1fr);
   gap: 10px;
-  max-height: calc(100vh - 24px);
+  height: calc(100dvh - 116px);
+  max-height: calc(100dvh - 116px);
+  min-height: 0;
 }
 
 .task-column .order-panel {
   position: static;
   min-height: 0;
+  max-height: none;
 }
 
 .work-queue,
@@ -849,7 +855,16 @@ button:disabled {
 .order-panel.empty {
   place-content: center;
   min-height: 360px;
+  overflow: visible;
   text-align: center;
+}
+
+.order-panel > .order-head,
+.order-panel > .order-info-panel,
+.order-panel > .order-actions-panel,
+.order-panel > .order-operation-panel,
+.order-panel > .checkout {
+  flex: 0 0 auto;
 }
 
 .order-head strong,
@@ -899,10 +914,13 @@ button:disabled {
 }
 
 .line-list {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   align-content: start;
   gap: 8px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 2px;
 }
 
@@ -1172,10 +1190,12 @@ button:disabled {
 }
 
 .checkout {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   padding-top: 12px;
+  background: #fff8ee;
 }
 
 .checkout div {
@@ -1198,6 +1218,7 @@ button:disabled {
 .checkout .primary,
 .checkout .secondary,
 .checkout .paid {
+  grid-column: auto;
   min-height: 52px;
   font-size: 18px;
 }
@@ -1223,6 +1244,12 @@ button:disabled {
 
 .secondary {
   background: #efe5d7;
+}
+
+.checkout > .primary,
+.checkout > .secondary,
+.checkout > .paid {
+  grid-column: auto;
 }
 
 .danger-action {
@@ -1935,6 +1962,7 @@ button:disabled {
   .task-column {
     position: static;
     grid-template-rows: auto;
+    height: auto;
     max-height: none;
   }
 
