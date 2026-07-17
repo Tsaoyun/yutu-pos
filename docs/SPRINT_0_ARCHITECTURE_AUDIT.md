@@ -333,6 +333,17 @@ Sprint 0 不全面重寫商品規則，只記錄遷移方向。
 - `orderModel.js` 是否改名為 `orderService.js`，或保持現名只整理內部。
 - 舊 orderItem 缺 metadata 時的 migration fallback 保留多久。
 
+## Sprint 2 Phase 2A Follow-Up
+
+Product metadata planning docs have been added:
+
+- `PRODUCT_SCHEMA_V2_PROPOSAL.md`
+- `PRODUCT_RULE_AUDIT.md`
+- `PRODUCT_MIGRATION_PLAN.md`
+- `MASTER_DATA_GUIDE.md`
+
+Phase 2A did not modify `src/services/orderModel.js` or Product runtime behavior. It confirms the next implementation should move ordering rules toward metadata-driven Product Schema v2, with lazy normalization first.
+
 ## 10. Recommended Next Order
 
 1. Sprint 1：定義營業狀態、今日結帳、結束營業與高風險系統操作邊界。

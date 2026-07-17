@@ -1,3 +1,27 @@
+# Backup Format Addendum: Sprint 1 Daily Operating Workflow
+
+Sprint 1 closing downloads a full backup.
+
+The full backup naturally includes the new normalized order fields and daily closing fields because it exports the full state arrays:
+
+- `orders`
+- `products`
+- `seats`
+- `dailyClosings`
+- `businessEvents`
+- `inventoryLots`
+- `inventoryItems`
+- `inventoryMovements`
+- `settings`
+
+Important behavior:
+
+- `daily` report export remains a report-only export and is not restorable.
+- `daily-archive` remains available as a legacy/export format but is not the Sprint 1 closing backup.
+- Daily closing flow uses `exportType: "full"`.
+- If full backup download is not confirmed, the created closing is kept with `backupStatus: "pending"` and can redownload full backup.
+- Old full backups remain compatible because missing Sprint 1 fields are filled by normalize.
+
 # Backup Format
 
 本文件描述目前 YUTU POS 的 JSON 匯出、封存與還原格式。內容以目前程式實作為準，不描述尚未實作的 Firestore sync 或未來理想格式。
@@ -91,6 +115,18 @@ yutu-pos-backup-yyyy-mm-dd-hhmm.json
 | `inventoryItems` | array | No | Yes | `[]` | Legacy | preserved as compatibility layer, not v2 truth source |
 | `inventoryMovements` | array | No | Yes | `[]` | Legacy | preserved as compatibility layer, not v2 truth source |
 | `settings` | object | No | n/a | current defaults | Partial | merged into state before normalize; UI state may be reset by normalize rules |
+
+### Product Backup Notes
+
+- Full backup preserves the flat Product shape.
+- `products[].cost` may be a number or `null`.
+  - `null` is exported as JSON `null` and means cost is unknown.
+  - `0` means the cost is confirmed as zero.
+  - Restore must not convert `null` to `0`.
+- `products[].supportsHot`, `products[].supportsIce`, and `products[].iceExtraPrice` are preserved and used by new order item snapshots.
+- Product service mode fields are not added in Sprint 2B. Dine-in / takeout remains order-level.
+- `products[].sort` is preserved as an internal category-order field. UI does not expose manual sort editing in Sprint 2B.
+- `menuItems` remains accepted as a legacy source when `products` is missing.
 
 ### Settings Snapshot
 

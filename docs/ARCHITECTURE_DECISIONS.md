@@ -1,3 +1,50 @@
+# Architecture Decision Addendum: Sprint 1 Closing Does Not Lock POS
+
+## ADR-013: Official DailyClosing Does Not Lock POS
+
+Status: Accepted
+
+Decision:
+An official DailyClosing is an audit snapshot, not a lock on same-day POS ordering. After `完成今日結帳`, the operator may still create normal dine-in or takeout orders. These orders continue through Order Queue, production, and checkout, not Late Entry.
+
+Reason:
+In real shop operations, a same-day closing can be completed early or need correction later. Locking POS would interrupt live service and force normal orders into the wrong data path.
+
+Consequence:
+Any order or Business Event change after official closing marks the closing as outdated. The operator should use `重新完成今日結帳`, which supersedes the old official closing and downloads a new Full Backup.
+
+# Architecture Decision Addendum: Sprint 1 Daily Operating Workflow
+
+## ADR-010: Operating Status Is Derived
+
+Status: Accepted
+
+Decision:
+YUTU POS does not store a separate manual "start business" flag in Sprint 1. The header status is derived from today's orders, business events, and official daily closing.
+
+Reason:
+This avoids stale operating flags after refresh and keeps the workflow tied to business records.
+
+## ADR-011: Closing Downloads Full Backup
+
+Status: Accepted
+
+Decision:
+The official daily closing flow downloads a full backup instead of a daily archive.
+
+Reason:
+For a live small-shop POS, the end-of-day backup should be restorable and include the complete local state, not only one day's report payload.
+
+## ADR-012: Paid Order Changes After Closing Are Audited
+
+Status: Accepted
+
+Decision:
+Paid order corrections are limited, voiding preserves records, and re-closing supersedes the previous official snapshot when the business date changes after closing.
+
+Reason:
+This preserves auditability without introducing a complex accounting system.
+
 # Architecture Decisions
 
 本文件記錄 YUTU POS v2 已接受的架構決策。它不是待辦清單，也不是功能提案；只有已確定、後續開發不得任意違反的原則會放在這裡。

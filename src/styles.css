@@ -112,17 +112,6 @@ button:disabled {
   font-weight: 800;
 }
 
-.dev-banner {
-  margin-bottom: 8px;
-  padding: 6px 10px;
-  background: #fff1d6;
-  border: 1px solid rgba(191, 143, 84, 0.38);
-  border-radius: 8px;
-  color: #7c4f13;
-  font-size: 13px;
-  font-weight: 800;
-}
-
 .debug-panel {
   position: fixed;
   right: 12px;
@@ -1679,6 +1668,175 @@ button:disabled {
   line-height: 1.5;
 }
 
+.daily-closing-page {
+  display: grid;
+  gap: 14px;
+}
+
+.daily-closing-page .section-title p {
+  margin: 4px 0 0;
+  color: #776b5f;
+  font-weight: 800;
+}
+
+.daily-status-card,
+.closing-result,
+.closing-primary-panel,
+.blocking-panel,
+.late-entry-panel {
+  padding: 14px;
+  background: #fffaf2;
+  border: 1px solid rgba(117, 88, 57, 0.14);
+  border-radius: 8px;
+}
+
+.daily-status-card {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.daily-status-card span,
+.daily-section span,
+.closing-result span {
+  display: block;
+  color: #776b5f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.daily-status-card strong,
+.daily-section strong,
+.closing-result strong {
+  display: block;
+  margin-top: 4px;
+  color: #2b241c;
+  font-size: 18px;
+}
+
+.daily-status-card.closed,
+.closing-result {
+  background: #eef6ef;
+  border-color: rgba(47, 95, 74, 0.22);
+}
+
+.closing-result.outdated {
+  background: #fff1d6;
+  border-color: rgba(191, 143, 84, 0.38);
+}
+
+.closing-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.closing-result small,
+.closing-result p {
+  display: block;
+  margin: 5px 0 0;
+  color: #776b5f;
+  font-weight: 800;
+}
+
+.closing-actions,
+.closing-primary-panel {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.daily-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.daily-section {
+  padding: 12px;
+  background: #fffaf2;
+  border: 1px solid rgba(117, 88, 57, 0.14);
+  border-radius: 8px;
+}
+
+.daily-section h3,
+.blocking-panel h3,
+.closing-primary-panel h3 {
+  margin: 0 0 8px;
+  color: #5f5144;
+}
+
+.daily-section p {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+
+.blocking-panel {
+  background: #fff1d6;
+  border-color: rgba(191, 143, 84, 0.38);
+}
+
+.blocking-panel p,
+.closing-primary-panel p {
+  margin: 0;
+  color: #776b5f;
+  font-weight: 800;
+}
+
+.blocking-panel div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.late-entry-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.late-entry-form label {
+  display: grid;
+  gap: 6px;
+  color: #776b5f;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.late-entry-form input,
+.late-entry-form select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(117, 88, 57, 0.18);
+  border-radius: 8px;
+  background: #fffaf2;
+  color: #2b241c;
+  font: inherit;
+  padding: 0 10px;
+}
+
+.late-entry-form .wide {
+  grid-column: span 2;
+}
+
+.history-item.voided {
+  opacity: 0.72;
+}
+
+.history-delete.disabled {
+  display: inline-grid;
+  place-items: center;
+  color: #776b5f;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .backup-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1809,7 +1967,10 @@ button:disabled {
   .business-event-form,
   .business-event-filters,
   .inventory-lot-form,
-  .inventory-lot-filters {
+  .inventory-lot-filters,
+  .late-entry-form,
+  .daily-status-card,
+  .daily-sections {
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -1894,7 +2055,8 @@ button:disabled {
   }
 
   .workspace-nav,
-  .backup-section {
+  .backup-section,
+  .closing-result {
     grid-template-columns: 1fr;
   }
 
@@ -1974,6 +2136,9 @@ button:disabled {
   .business-event-filters,
   .inventory-lot-form,
   .inventory-lot-filters,
+  .late-entry-form,
+  .daily-status-card,
+  .daily-sections,
   .history-tools,
   .admin-product,
   .backup-actions,
@@ -1987,7 +2152,8 @@ button:disabled {
 
   .product-form .wide,
   .business-event-form .wide,
-  .inventory-lot-form .wide {
+  .inventory-lot-form .wide,
+  .late-entry-form .wide {
     grid-column: auto;
   }
 }

@@ -1,3 +1,41 @@
+# Business Rules Addendum: Sprint 2B Product Metadata
+
+- Product rules for new order items are metadata-driven.
+- Category defaults live in `CATEGORY_METADATA`; Product explicit values override category defaults.
+- Ice extra pricing is resolved from `product.iceExtraPrice` / order item `iceExtraPrice`, not from Product name or hard-coded category checks.
+- Product cost can be `null`.
+  - `null` means unknown and must not be treated as zero in Analytics.
+  - `0` means confirmed zero cost.
+- Revenue includes all paid order items.
+- Known gross profit includes only order items with numeric cost snapshots.
+- Unknown-cost item count is surfaced so operators know profit is incomplete.
+- Service Mode remains an Order-level workflow. Product Editor does not decide whether an item is dine-in or takeout.
+- Existing order item snapshots are not recalculated when Product metadata changes.
+
+# Business Rules Addendum: Sprint 1 Closing Does Not Lock POS
+
+- Official DailyClosing is an audit snapshot, not a POS lock.
+- After `完成今日結帳`, the operator can still create normal table and takeout orders.
+- Those orders still use Order Queue, production, and checkout.
+- Late Entry is only for missed historical paid orders, not for normal post-closing same-day orders.
+- Any order or Business Event change after official closing makes the current official closing outdated.
+- `重新完成今日結帳` creates a new official DailyClosing, marks the old official as superseded, and downloads a Full Backup.
+- Do not add reopen-store, development override, or time-lock behavior.
+
+# Business Rules Addendum: Sprint 1 Daily Operating Workflow
+
+- Operating status is derived, not manually started.
+- `今日結帳` owns the end-of-day workflow.
+- `資料與設定` owns full backup, restore, reset, and legacy daily report export.
+- Daily closing is blocked while open orders exist.
+- Daily closing creates a snapshot only; orders remain the source of truth.
+- Closing downloads a full backup, not a daily archive.
+- Paid order undo checkout is allowed only before the order business date is officially closed.
+- Paid order correction after checkout is limited and requires a reason.
+- Voiding a paid order changes its status to `voided`; it does not delete the order and does not imply refund.
+- Late entries are paid historical orders, not active orders, and require a reason.
+- Re-closing creates a new official closing and supersedes the previous official closing for the same date.
+
 # Business Rules Addendum: Navigation And Undo Checkout
 
 目前首頁導覽依現場工作模式排序，而不是依資料表排序。`POS 工作台` 是預設入口；其他入口分為營業、紀錄與庫存、管理與分析、系統。

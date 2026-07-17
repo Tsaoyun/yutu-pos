@@ -1,3 +1,17 @@
+# Technical Debt Addendum: Sprint 1
+
+| ID | Category | Description | Impact | Risk | Proposed Sprint | Status |
+|---|---|---|---|---|---|---|
+| TD-019 | Workflow | Closing workflow previously mixed daily archive export with backup/data page | End-of-day restore expectations were unclear | High | Sprint 1 | Fixed |
+| TD-020 | Workflow | Undo checkout could reopen paid orders without considering official daily closing | Closed business dates could be changed without clear closing status | High | Sprint 1 | Fixed |
+| TD-021 | Audit | Paid history delete was destructive | Lost audit trail for paid orders | High | Sprint 1 | Fixed with void |
+| TD-022 | UX/Data | Late missed orders had no controlled entry path | Operators could edit history or reopen orders to correct a missed sale | Medium | Sprint 1 | Fixed with late entry MVP |
+| TD-023 | Architecture | Daily closing, late entry, correction, and void helpers still live in `main.js` | `main.js` remains large and should be split later | Medium | Future service extraction | Open |
+| TD-024 | Product Metadata | `orderModel.js` still contains pourover ice extra and category string checks | New product rules can drift from Product Editor metadata | High | Sprint 2B | Fixed |
+| TD-025 | Product Metadata | Product capability fields are mixed between `supportsHot`, `supportsIce`, `supportsTakeout`, `requiresTemperature`, and `requiresServiceType` | Hard to define one stable Product contract | Medium | Sprint 2B | Partially fixed; legacy fields retained for compatibility |
+| TD-026 | Master Data | Categories are static code constants and do not yet carry explicit defaults | Category behavior is split between constants and normalize logic | Medium | Sprint 2B | Fixed with `CATEGORY_METADATA` |
+| TD-027 | Analytics | Product ranking key combines product id and item name | Product rename can split historical ranking rows | Low-Medium | Analytics cleanup | Open |
+
 # Technical Debt Register
 
 本文件只記錄目前架構、程式或文件中已存在，且會影響維護性、資料一致性或正確性的問題。未來想做但尚未存在的功能，不列為技術債。

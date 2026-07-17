@@ -1,3 +1,53 @@
+# Current Status Addendum: Sprint 2B Product Metadata
+
+Implemented in Sprint 2B:
+
+- Product metadata remains a flat schema.
+- `signature` is available as an additive Product category.
+- Existing category id `beans` is preserved for compatibility.
+- `CATEGORY_METADATA` is an in-code constant and provides category defaults for type, hot/ice support, and ice extra price.
+- `orderModel.js` no longer contains the fixed `POUROVER_ICE_EXTRA` rule or `pourover` category string check.
+- New order items use resolved Product metadata for `iceExtraPrice`.
+- Product Editor no longer shows Product-level takeout settings.
+- Product cost may be blank. Blank cost is saved as `null`; `0` remains a real zero-cost value.
+- Product Management sorts products by category order, then internal `sort`, then name.
+- Analytics revenue includes unknown-cost items, but known gross profit excludes them and shows unknown-cost counts.
+
+Not implemented in Sprint 2B:
+
+- Firestore Category Master Data.
+- Product service modes.
+- `defaultTemperature`.
+- Drag-and-drop product sorting.
+- Inventory / Recipe / Bean Domain.
+- Large category id migration.
+
+# Current Status Addendum: Sprint 1 Closing Does Not Lock POS
+
+Updated product rule:
+
+- Official DailyClosing does not lock POS ordering.
+- After today's closing, normal dine-in and takeout orders can still be created through the usual queue, production, and checkout flow.
+- New same-day orders after closing are not Late Entry.
+- Orders, paid-order corrections, voids, late entries, or Business Events changed after official closing make the current closing outdated.
+- The status labels are `尚未結帳`, `今日已結帳`, and `結帳後有異動`.
+- The user action is `完成今日結帳`; outdated closings use `重新完成今日結帳`.
+
+# Current Status Addendum: Sprint 1 Daily Operating Workflow
+
+Implemented in Sprint 1:
+
+- `今日結帳` is a separate page from `資料與設定`.
+- Header operating status is derived from today's orders, business events, and official daily closing records.
+- There is no manual start-business action.
+- Closing is blocked when open orders exist.
+- Closing creates a `dailyClosing` snapshot and downloads a full backup.
+- If a closing backup download is not confirmed, the closing remains and can redownload full backup.
+- Paid order undo checkout is blocked after the business date has an official daily closing.
+- Paid-order corrections are limited to payment method, customer source, customer source note, order note, and dine-in/takeaway display.
+- Paid orders can be voided without permanent deletion; voided orders remain visible in history and are excluded from paid-order analytics.
+- Late entries are saved as paid historical orders with `entryType: "late_entry"` and do not enter the active queue.
+
 # Current Status Addendum: Navigation IA
 
 目前首頁預設為 `POS 工作台`，主體仍是 `Order Queue + Current Order`，用於處理進行中的內用與外帶訂單。

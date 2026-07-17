@@ -1,5 +1,6 @@
 import { summarizeBusinessEvents } from "./businessEvents.js";
 import { buildCustomerSourceSummary } from "./customerSource.js";
+import { knownUnitCost } from "./orderModel.js";
 
 function toDateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -22,10 +23,6 @@ function unitPrice(item) {
   return Number(item.effectivePrice ?? item.price) || 0;
 }
 
-function unitCost(item) {
-  return Number(item.cost) || 0;
-}
-
 function quantity(item) {
   return Number(item.quantity) || 0;
 }
@@ -40,17 +37,51 @@ function categoryLabel(category, labels = {}) {
 
 function seatLabel(seatId, labels = {}) {
   if (seatId === "takeout") return labels.takeout || "外帶";
-  return labels[seatId] || seatId || "未知座位";
+  return labels[seatId] || seatId || "未指定座位";
+}
+
+function emptyCostAwareMetrics() {
+  return {
+    revenue: 0,
+    cost: 0,
+    profit: 0,
+    knownCostRevenue: 0,
+    unknownCostRevenue: 0,
+    unknownCostItems: 0,
+    unknownCostQuantity: 0,
+    marginRate: 0
+  };
+}
+
+function addCostAwareItem(summary, item) {
+  const count = quantity(item);
+  const revenue = unitPrice(item) * count;
+  const costPerUnit = knownUnitCost(item.cost);
+
+  summary.revenue += revenue;
+  if (costPerUnit === null) {
+    summary.unknownCostRevenue += revenue;
+    summary.unknownCostItems += 1;
+    summary.unknownCostQuantity += count;
+    return;
+  }
+
+  const cost = costPerUnit * count;
+  summary.cost += cost;
+  summary.knownCostRevenue += revenue;
+  summary.profit += revenue - cost;
+}
+
+function finalizeCostAwareMetrics(summary) {
+  summary.marginRate = marginRate(summary.profit, summary.knownCostRevenue || summary.revenue);
+  return summary;
 }
 
 function ensureCategoryRows(labels = {}) {
   return Object.values(labels).map((category) => ({
     category,
     quantity: 0,
-    revenue: 0,
-    cost: 0,
-    profit: 0,
-    marginRate: 0
+    ...emptyCostAwareMetrics()
   }));
 }
 
@@ -72,13 +103,7 @@ export function buildOverviewMetrics(orders) {
 
       order.items?.forEach((item) => {
         const count = quantity(item);
-        const revenue = unitPrice(item) * count;
-        const cost = unitCost(item) * count;
-        const profit = revenue - cost;
-
-        summary.revenue += revenue;
-        summary.cost += cost;
-        summary.profit += profit;
+        addCostAwareItem(summary, item);
         summary.drinks += item.type === "drink" ? count : 0;
         summary.desserts += item.type === "dessert" ? count : 0;
         summary.retail += item.type === "retail" ? count : 0;
@@ -87,10 +112,7 @@ export function buildOverviewMetrics(orders) {
       return summary;
     },
     {
-      revenue: 0,
-      cost: 0,
-      profit: 0,
-      marginRate: 0,
+      ...emptyCostAwareMetrics(),
       orderCount: 0,
       people: 0,
       averageTicket: 0,
@@ -100,7 +122,7 @@ export function buildOverviewMetrics(orders) {
     }
   );
 
-  metrics.marginRate = marginRate(metrics.profit, metrics.revenue);
+  finalizeCostAwareMetrics(metrics);
   metrics.averageTicket = metrics.orderCount ? metrics.revenue / metrics.orderCount : 0;
   return metrics;
 }
@@ -113,21 +135,13 @@ export function buildProductRanking(orders, options = {}) {
   (Array.isArray(orders) ? orders : []).forEach((order) => {
     order.items?.forEach((item) => {
       const count = quantity(item);
-      const price = unitPrice(item);
-      const costPerUnit = unitCost(item);
-      const revenue = price * count;
-      const cost = costPerUnit * count;
-      const profit = revenue - cost;
       const key = `${item.productId || item.name}-${item.name}`;
       const row = rows.get(key) || {
         productId: item.productId || "",
         name: item.name,
         category: categoryLabel(item.category, labels),
         quantity: 0,
-        revenue: 0,
-        cost: 0,
-        profit: 0,
-        marginRate: 0,
+        ...emptyCostAwareMetrics(),
         iced: 0,
         hot: 0,
         dineIn: 0,
@@ -136,9 +150,7 @@ export function buildProductRanking(orders, options = {}) {
       };
 
       row.quantity += count;
-      row.revenue += revenue;
-      row.cost += cost;
-      row.profit += profit;
+      addCostAwareItem(row, item);
       row.iced += item.type === "drink" && item.temperature === "冰" ? count : 0;
       row.hot += item.type === "drink" && item.temperature === "熱" ? count : 0;
       row.dineIn += item.serviceType === "內用" ? count : 0;
@@ -146,7 +158,7 @@ export function buildProductRanking(orders, options = {}) {
       if (item.variantName) {
         row.variants[item.variantName] = (row.variants[item.variantName] || 0) + count;
       }
-      row.marginRate = marginRate(row.profit, row.revenue);
+      finalizeCostAwareMetrics(row);
       rows.set(key, row);
     });
   });
@@ -168,16 +180,11 @@ export function buildCategorySummary(orders, options = {}) {
   (Array.isArray(orders) ? orders : []).forEach((order) => {
     order.items?.forEach((item) => {
       const count = quantity(item);
-      const revenue = unitPrice(item) * count;
-      const cost = unitCost(item) * count;
-      const profit = revenue - cost;
       const category = categoryLabel(item.category, labels);
-      const row = rows.get(category) || { category, quantity: 0, revenue: 0, cost: 0, profit: 0, marginRate: 0 };
+      const row = rows.get(category) || { category, quantity: 0, ...emptyCostAwareMetrics() };
       row.quantity += count;
-      row.revenue += revenue;
-      row.cost += cost;
-      row.profit += profit;
-      row.marginRate = marginRate(row.profit, row.revenue);
+      addCostAwareItem(row, item);
+      finalizeCostAwareMetrics(row);
       rows.set(category, row);
     });
   });

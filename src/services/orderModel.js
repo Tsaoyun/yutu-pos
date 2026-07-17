@@ -9,23 +9,26 @@ function createLineId() {
   return `line-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-const POUROVER_ICE_EXTRA = 10;
-
-function isPourover(category) {
-  return category === "pourover" || category === "手沖";
+export function knownUnitCost(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const cost = Number(value);
+  return Number.isFinite(cost) ? cost : null;
 }
 
 export function priceFieldsForItem(item) {
   const basePrice = Number(item.basePrice ?? item.price ?? item.effectivePrice) || 0;
-  const iceExtra = isPourover(item.category) && item.temperature === "冰" ? POUROVER_ICE_EXTRA : 0;
+  const iceExtraPrice = Number(item.iceExtraPrice ?? item.iceExtra ?? 0) || 0;
+  const iceExtra = item.temperature === "冰" ? iceExtraPrice : 0;
   const effectivePrice = basePrice + iceExtra;
+  const cost = knownUnitCost(item.cost);
 
   return {
     basePrice,
     effectivePrice,
     iceExtra,
+    iceExtraPrice,
     price: effectivePrice,
-    profit: effectivePrice - (Number(item.cost) || 0)
+    profit: cost === null ? null : effectivePrice - cost
   };
 }
 
@@ -54,7 +57,8 @@ export function addOrderItem(order, product, options = {}) {
     category: product.category,
     temperature,
     basePrice: product.price,
-    cost: product.cost
+    cost: knownUnitCost(product.cost),
+    iceExtraPrice: Number(product.iceExtraPrice) || 0
   };
   const priceFields = priceFieldsForItem(baseItem);
 
@@ -72,13 +76,16 @@ export function addOrderItem(order, product, options = {}) {
         quantity: 1,
         requiresTemperature,
         requiresServiceType,
+        supportsHot: product.supportsHot,
+        supportsIce: product.supportsIce,
+        iceExtraPrice: priceFields.iceExtraPrice,
         temperature,
         serviceType: requiresServiceType ? serviceType : "",
         basePrice: priceFields.basePrice,
         effectivePrice: priceFields.effectivePrice,
         iceExtra: priceFields.iceExtra,
         price: priceFields.price,
-        cost: product.cost,
+        cost: baseItem.cost,
         profit: priceFields.profit,
         served: false,
         note: options.note || ""
@@ -110,16 +117,35 @@ export function calculateOrder(order) {
     (summary, item) => {
       const quantity = Number(item.quantity) || 0;
       const price = Number(item.effectivePrice ?? item.price) || 0;
-      const cost = Number(item.cost) || 0;
+      const cost = knownUnitCost(item.cost);
 
       summary.total += price * quantity;
-      summary.cost += cost * quantity;
-      summary.profit += (price - cost) * quantity;
+      if (cost === null) {
+        summary.unknownCostItems += 1;
+        summary.unknownCostQuantity += quantity;
+        summary.unknownCostRevenue += price * quantity;
+      } else {
+        summary.cost += cost * quantity;
+        summary.knownCostRevenue += price * quantity;
+        summary.profit += (price - cost) * quantity;
+      }
       summary.drinks += item.type === "drink" ? quantity : 0;
       summary.desserts += item.type === "dessert" ? quantity : 0;
+      summary.retail += item.type === "retail" ? quantity : 0;
       return summary;
     },
-    { total: 0, cost: 0, profit: 0, drinks: 0, desserts: 0 }
+    {
+      total: 0,
+      cost: 0,
+      profit: 0,
+      knownCostRevenue: 0,
+      unknownCostRevenue: 0,
+      unknownCostItems: 0,
+      unknownCostQuantity: 0,
+      drinks: 0,
+      desserts: 0,
+      retail: 0
+    }
   );
 }
 

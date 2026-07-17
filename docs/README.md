@@ -1,3 +1,31 @@
+# Docs Addendum: Sprint 1 Daily Operating Workflow
+
+Sprint 1 adds the implemented daily operating workflow documentation:
+
+- `DAILY_OPERATING_WORKFLOW.md`: how operating status, today closing, late entry, paid-order corrections, and void work.
+- `DAILY_CLOSING_RULES.md`: daily closing snapshot rules, official/superseded versioning, backup behavior, and recalculation boundaries.
+
+Recommended reading order after Sprint 1:
+
+1. `CURRENT_STATUS.md`
+2. `DAILY_OPERATING_WORKFLOW.md`
+3. `DAILY_CLOSING_RULES.md`
+4. `DATA_MODEL.md`
+5. `BACKUP_FORMAT.md`
+6. `BUSINESS_RULES.md`
+7. `ARCHITECTURE_DECISIONS.md`
+8. `TECHNICAL_DEBT.md`
+
+Sprint 2 Phase 2A product metadata planning:
+
+- `SPRINT2_IMPLEMENTATION_REVIEW.md`: final Sprint 2 implementation review and commit readiness.
+- `PRODUCT_SPECIFICATION_V1_REVIEW.md`: review of the external Product Specification v1 against the current codebase.
+- `SPRINT2B_IMPLEMENTATION_PLAN.md`: implementation sequence and acceptance tests for Product metadata cleanup.
+- `PRODUCT_SCHEMA_V2_PROPOSAL.md`: proposed Product Schema v2, category defaults, and field decisions.
+- `PRODUCT_RULE_AUDIT.md`: current hard-coded product/order rules and risk table.
+- `PRODUCT_MIGRATION_PLAN.md`: proposed lazy normalize and Phase 2B migration steps.
+- `MASTER_DATA_GUIDE.md`: master data, transaction data, snapshot, and derived-data boundaries.
+
 # Docs Addendum: Current IA Names
 
 目前介面入口以 v2 導覽命名為準：`POS 工作台`、`訂單歷史`、`今日結帳`、`營運事件`、`庫存現況`、`商品`、`經營分析`、`資料與設定`。
