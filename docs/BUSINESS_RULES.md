@@ -1,3 +1,60 @@
+# Business Rules Addendum: Sprint 2B Product Metadata
+
+- Product rules for new order items are metadata-driven.
+- Category defaults live in `CATEGORY_METADATA`; Product explicit values override category defaults.
+- Ice extra pricing is resolved from `product.iceExtraPrice` / order item `iceExtraPrice`, not from Product name or hard-coded category checks.
+- Product cost can be `null`.
+  - `null` means unknown and must not be treated as zero in Analytics.
+  - `0` means confirmed zero cost.
+- Revenue includes all paid order items.
+- Known gross profit includes only order items with numeric cost snapshots.
+- Unknown-cost item count is surfaced so operators know profit is incomplete.
+- Service Mode remains an Order-level workflow. Product Editor does not decide whether an item is dine-in or takeout.
+- Existing order item snapshots are not recalculated when Product metadata changes.
+
+# Business Rules Addendum: Sprint 1 Closing Does Not Lock POS
+
+- Official DailyClosing is an audit snapshot, not a POS lock.
+- After `完成今日結帳`, the operator can still create normal table and takeout orders.
+- Those orders still use Order Queue, production, and checkout.
+- Late Entry is only for missed historical paid orders, not for normal post-closing same-day orders.
+- Any order or Business Event change after official closing makes the current official closing outdated.
+- `重新完成今日結帳` creates a new official DailyClosing, marks the old official as superseded, and downloads a Full Backup.
+- Do not add reopen-store, development override, or time-lock behavior.
+
+# Business Rules Addendum: Sprint 1 Daily Operating Workflow
+
+- Operating status is derived, not manually started.
+- `今日結帳` owns the end-of-day workflow.
+- `資料與設定` owns full backup, restore, reset, and legacy daily report export.
+- Daily closing is blocked while open orders exist.
+- Daily closing creates a snapshot only; orders remain the source of truth.
+- Closing downloads a full backup, not a daily archive.
+- Paid order undo checkout is allowed only before the order business date is officially closed.
+- Paid order correction after checkout is limited and requires a reason.
+- Voiding a paid order changes its status to `voided`; it does not delete the order and does not imply refund.
+- Late entries are paid historical orders, not active orders, and require a reason.
+- Re-closing creates a new official closing and supersedes the previous official closing for the same date.
+
+# Business Rules Addendum: Navigation And Undo Checkout
+
+目前首頁導覽依現場工作模式排序，而不是依資料表排序。`POS 工作台` 是預設入口；其他入口分為營業、紀錄與庫存、管理與分析、系統。
+
+目前介面命名：
+
+- `訂單歷史`：paid orders、指定日期日報、銷售彙總與訂單明細。
+- `營運事件`：businessEvents，記錄採購、報廢、自用、測試與招待，不寫入 orders。
+- `庫存現況`：inventoryLots，第一版只顯示 / 新增甜點與熟豆批次。
+- `資料與設定`：同頁分成 `今日結帳／日結` 與 `資料備份與還原`。
+
+Undo Checkout 規則：
+
+- 首頁不提供全域 `撤銷最後結帳` 按鈕。
+- 撤銷入口目前只在 `訂單歷史` 頁顯示。
+- 只有最近一筆 paid order 且 `checkedOutAt` 距今不超過 5 分鐘時，才顯示 `撤銷此筆結帳`。
+- 操作前確認視窗會列出座位 / 外帶、結帳時間與金額。
+- 撤銷後該 order 回到 `status: "open"`，原始品項與出品狀態保留；若座位已被其他 open order 佔用則禁止撤銷。
+
 # Business Rules
 
 本文件從目前程式碼推導 YUTU POS 的營業規則。無法從程式碼確認的事項標示為「待確認」。
@@ -188,9 +245,8 @@
 - 待確認：正式營運是否已啟用 Firestore 同步；目前主流程使用 localStorage，Firestore adapter 檔案存在但未在 `main.js` 主流程中使用。
 # IA Naming Note
 
-- `銷售紀錄`：原 `歷史` 入口，查詢 paid orders、指定日期日報、銷售彙總與訂單明細。
-- `銷售紀錄 / 日報`：原 `打烊報表` 頁面標題。
-- `營運紀錄`：記錄採購、報廢、自用、測試與招待，不影響銷售訂單。
-- `資源管理`：原 `批次管理` 入口，Phase 4A 頁面內以 `甜點與熟豆批次` 為主。
-- `備份與日結`：原 `備份 / 資料` 入口，處理 full backup、daily report、daily archive、匯入與日結。
+- `訂單歷史`：原 `歷史` 入口，查詢 paid orders、指定日期日報、銷售彙總與訂單明細。
+- `營運事件`：記錄採購、報廢、自用、測試與招待，不影響銷售訂單。
+- `庫存現況`：原 `批次管理` 入口，Phase 4A 頁面內以 `甜點與熟豆批次` 為主。
+- `資料與設定`：原 `備份 / 資料` 入口，頁內分為 `今日結帳／日結` 與 `資料備份與還原`。
 - `客源分析`：Dashboard 中的 customer source summary。

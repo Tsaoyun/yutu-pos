@@ -1,3 +1,83 @@
+# Release: YUTU POS v0.9.0 — Product Foundation
+
+Release date: 2026-07-17
+
+This release marks the completed Sprint 2 Product Foundation work:
+
+- Workspace stabilization is included.
+- Product metadata is flat and metadata-driven.
+- `signature` is available as an additive category.
+- Cold surcharge uses Product / order item `iceExtraPrice`.
+- Product cost supports `number | null`.
+- Analytics labels known gross profit and surfaces unknown-cost counts.
+- Backup / restore remains compatible with existing localStorage data.
+
+# Current Status Addendum: Sprint 2B Product Metadata
+
+Implemented in Sprint 2B:
+
+- Product metadata remains a flat schema.
+- `signature` is available as an additive Product category.
+- Existing category id `beans` is preserved for compatibility.
+- `CATEGORY_METADATA` is an in-code constant and provides category defaults for type, hot/ice support, and ice extra price.
+- `orderModel.js` no longer contains the fixed `POUROVER_ICE_EXTRA` rule or `pourover` category string check.
+- New order items use resolved Product metadata for `iceExtraPrice`.
+- Product Editor no longer shows Product-level takeout settings.
+- Product cost may be blank. Blank cost is saved as `null`; `0` remains a real zero-cost value.
+- Product Management sorts products by category order, then internal `sort`, then name.
+- Analytics revenue includes unknown-cost items, but known gross profit excludes them and shows unknown-cost counts.
+
+Not implemented in Sprint 2B:
+
+- Firestore Category Master Data.
+- Product service modes.
+- `defaultTemperature`.
+- Drag-and-drop product sorting.
+- Inventory / Recipe / Bean Domain.
+- Large category id migration.
+
+# Current Status Addendum: Sprint 1 Closing Does Not Lock POS
+
+Updated product rule:
+
+- Official DailyClosing does not lock POS ordering.
+- After today's closing, normal dine-in and takeout orders can still be created through the usual queue, production, and checkout flow.
+- New same-day orders after closing are not Late Entry.
+- Orders, paid-order corrections, voids, late entries, or Business Events changed after official closing make the current closing outdated.
+- The status labels are `尚未結帳`, `今日已結帳`, and `結帳後有異動`.
+- The user action is `完成今日結帳`; outdated closings use `重新完成今日結帳`.
+
+# Current Status Addendum: Sprint 1 Daily Operating Workflow
+
+Implemented in Sprint 1:
+
+- `今日結帳` is a separate page from `資料與設定`.
+- Header operating status is derived from today's orders, business events, and official daily closing records.
+- There is no manual start-business action.
+- Closing is blocked when open orders exist.
+- Closing creates a `dailyClosing` snapshot and downloads a full backup.
+- If a closing backup download is not confirmed, the closing remains and can redownload full backup.
+- Paid order undo checkout is blocked after the business date has an official daily closing.
+- Paid-order corrections are limited to payment method, customer source, customer source note, order note, and dine-in/takeaway display.
+- Paid orders can be voided without permanent deletion; voided orders remain visible in history and are excluded from paid-order analytics.
+- Late entries are saved as paid historical orders with `entryType: "late_entry"` and do not enter the active queue.
+
+# Current Status Addendum: Navigation IA
+
+目前首頁預設為 `POS 工作台`，主體仍是 `Order Queue + Current Order`，用於處理進行中的內用與外帶訂單。
+
+已完成的導覽命名與分區：
+
+- `訂單歷史`：查詢已結帳訂單、指定日期日報、銷售彙總與訂單明細。
+- `今日結帳`：導向 `資料與設定` 頁中的 `今日結帳／日結` 區塊，處理今日資料匯出與結束營業 / 日報匯出。
+- `營運事件`：原營運紀錄，用於記錄採購、報廢、自用、測試與招待，不影響銷售訂單。
+- `庫存現況`：原資源管理，第一版內容為 `甜點與熟豆批次`。
+- `商品`：導向商品管理。
+- `經營分析`：Dashboard / analytics。
+- `資料與設定`：同頁分為 `今日結帳／日結` 與 `資料備份與還原`。
+
+首頁已移除 `撤銷最後結帳` 全域危險按鈕。撤銷入口目前只在 `訂單歷史` 顯示，且只針對最近一筆仍在 5 分鐘可撤銷時間內的結帳，按鈕會顯示明確桌位 / 外帶與金額。
+
 # Current Status
 
 本文件依目前 `src/` 程式碼描述已實作功能。畫面文字若因原始檔編碼顯示異常，本文件以程式 action、資料欄位與流程邏輯為準。
@@ -93,7 +173,7 @@
 
 ## Undo Checkout
 
-- 已實作「撤銷最後結帳」。
+- 已實作受控 Undo Checkout：`訂單歷史` 只會針對最近一筆仍在 5 分鐘內可撤銷的結帳顯示 `撤銷此筆結帳`，首頁不再提供全域撤銷按鈕。
 - 只會找最近一筆有 `checkedOutAt` 的 paid order。
 - 結帳超過 5 分鐘不可撤銷。
 - 內用訂單若原座位已有其他 open order，不可撤銷。

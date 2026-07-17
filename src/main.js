@@ -5,11 +5,13 @@ import {
   calculateOrder,
   checkoutOrder,
   createOrder,
+  knownUnitCost,
   removeOrderItem,
   updateOrderItem
 } from "./services/orderModel.js";
 import { buildAnalyticsDashboard } from "./services/analytics.js";
 import {
+  buildCustomerSourceSummary,
   customerSourceLabel,
   customerSourceLabelMap,
   customerSourceOptions,
@@ -20,7 +22,8 @@ import {
   businessEventTypeLabel,
   businessEventTypeOptions,
   createBusinessEvent,
-  normalizeBusinessEvents
+  normalizeBusinessEvents,
+  summarizeBusinessEvents
 } from "./services/businessEvents.js";
 import {
   createInventoryLot,
@@ -34,11 +37,11 @@ import { loadState, saveState, STORAGE_KEY } from "./services/storage.js";
 import "./styles.css";
 
 const typeLabels = { drink: "飲品", dessert: "甜品", retail: "熟豆" };
-const APP_BRANCH = "feature/analytics-dashboard";
-const PRODUCTION_HOSTS = ["yutu-pos.vercel.app"];
 const TAKEOUT_SEAT_ID = "takeout";
 const TAKEOUT_SEAT = { id: TAKEOUT_SEAT_ID, name: "外帶", icon: "🥡" };
 const UNDO_CHECKOUT_LIMIT_MINUTES = 5;
+const LATE_ENTRY_REASONS = ["漏登訂單", "紙本紀錄補登", "系統故障", "誤刪後重建", "其他"];
+const paymentLabels = { cash: "現金", electronic: "電子支付" };
 const money = new Intl.NumberFormat("zh-TW", {
   style: "currency",
   currency: "TWD",
@@ -49,8 +52,29 @@ const percent = new Intl.NumberFormat("zh-TW", {
   maximumFractionDigits: 1
 });
 const CATEGORY_METADATA = {
-  pourover: { iceExtraPrice: 10 }
+  espresso: { type: "drink", supportsHot: true, supportsIce: true, iceExtraPrice: 0 },
+  pourover: { type: "drink", supportsHot: true, supportsIce: true, iceExtraPrice: 10 },
+  tea: { type: "drink", supportsHot: true, supportsIce: true, iceExtraPrice: 0 },
+  signature: { type: "drink", supportsHot: true, supportsIce: true, iceExtraPrice: 0 },
+  dessert: { type: "dessert", supportsHot: false, supportsIce: false, iceExtraPrice: 0 },
+  beans: { type: "retail", supportsHot: false, supportsIce: false, iceExtraPrice: 0 }
 };
+
+function categoryMetadata(categoryId) {
+  return CATEGORY_METADATA[categoryId] || {};
+}
+
+function parseOptionalCost(value) {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return null;
+  const cost = Number(raw);
+  return Number.isFinite(cost) ? cost : null;
+}
+
+function formatCost(value) {
+  const cost = knownUnitCost(value);
+  return cost === null ? "成本未知" : money.format(cost);
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -59,6 +83,14 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function normalizeNotice(notice) {
+  const text = String(notice || "");
+  const oldClosedText = ["今日已", "結束"].join("");
+  const isOldPosLockNotice = text.includes(oldClosedText) && text.includes("建立") && text.includes("訂單");
+  const isOldLateEntryNotice = text.includes("漏登") && text.includes("補登");
+  return isOldPosLockNotice || isOldLateEntryNotice ? "" : text;
 }
 
 const isDebugMode = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -131,16 +163,17 @@ function normalizeOptions(options) {
 }
 
 function productMetadataDefaults(product) {
-  const type = product.type || "drink";
   const category = product.category || "espresso";
+  const categoryDefaults = categoryMetadata(category);
+  const type = product.type || categoryDefaults.type || "drink";
   const isDrink = type === "drink";
   const isRetail = type === "retail";
-  const categoryMetadata = CATEGORY_METADATA[category] || {};
   return {
-    supportsHot: product.supportsHot ?? isDrink,
-    supportsIce: product.supportsIce ?? isDrink,
+    type,
+    supportsHot: product.supportsHot ?? categoryDefaults.supportsHot ?? isDrink,
+    supportsIce: product.supportsIce ?? categoryDefaults.supportsIce ?? isDrink,
     supportsTakeout: product.supportsTakeout ?? !isRetail,
-    iceExtraPrice: Number(product.iceExtraPrice ?? (isDrink ? categoryMetadata.iceExtraPrice : 0)) || 0
+    iceExtraPrice: Number(product.iceExtraPrice ?? (isDrink ? categoryDefaults.iceExtraPrice : 0)) || 0
   };
 }
 
@@ -157,17 +190,40 @@ function normalizeDailyClosings(dailyClosings) {
         ...closing,
         id: closing.id || `closing-${date}-${index}`,
         date,
+        businessDate: closing.businessDate || date,
         closedAt,
         orderCount: Number(closing.orderCount) || 0,
         totalSales,
+        revenue: Number(closing.revenue ?? totalSales) || 0,
         totalCost: Number(closing.totalCost) || 0,
         grossProfit,
         grossMargin: Number(closing.grossMargin ?? (totalSales ? grossProfit / totalSales : 0)) || 0,
+        knownCostRevenue: Number(closing.knownCostRevenue) || 0,
+        knownGrossMargin: Number(closing.knownGrossMargin) || 0,
+        unknownCostRevenue: Number(closing.unknownCostRevenue) || 0,
+        unknownCostItems: Number(closing.unknownCostItems) || 0,
+        unknownCostQuantity: Number(closing.unknownCostQuantity) || 0,
+        paymentSummary: closing.paymentSummary || {},
+        customerSourceSummary: Array.isArray(closing.customerSourceSummary) ? closing.customerSourceSummary : [],
+        businessEventSummary: closing.businessEventSummary || {
+          wasteCost: 0,
+          personalCost: 0,
+          testCost: 0,
+          complimentaryCost: 0,
+          purchaseAmount: 0
+        },
+        openOrderCount: Number(closing.openOrderCount) || 0,
+        snapshotVersion: Number(closing.snapshotVersion) || 1,
+        supersedesId: closing.supersedesId || null,
+        changeSummary: closing.changeSummary || null,
         drinkCount: Number(closing.drinkCount) || 0,
         dessertCount: Number(closing.dessertCount) || 0,
         retailCount: Number(closing.retailCount) || 0,
         exported: Boolean(closing.exported),
+        backupStatus: closing.backupStatus || "pending",
+        backupDownloadedAt: closing.backupDownloadedAt || null,
         exportedAt: closing.exportedAt || null,
+        createdAt: closing.createdAt || closedAt,
         version: Number(closing.version) || null,
         status: closing.status === "superseded" ? "superseded" : "official",
         isOfficial: closing.isOfficial !== false && closing.status !== "superseded",
@@ -277,9 +333,9 @@ function normalizeState(savedState) {
       id: product.id || `product-${Date.now()}-${index}`,
       name: product.name || "未命名商品",
       category: product.category || "espresso",
-      type: product.type || "drink",
+      type: product.type || metadata.type || "drink",
       price: Number(product.price) || 0,
-      cost: Number(product.cost) || 0,
+      cost: parseOptionalCost(product.cost),
       requiresTemperature: product.requiresTemperature ?? (metadata.supportsHot || metadata.supportsIce),
       requiresServiceType: product.requiresServiceType ?? metadata.supportsTakeout,
       active: product.active !== false,
@@ -293,6 +349,18 @@ function normalizeState(savedState) {
   const orders = Array.isArray(savedState.orders)
     ? savedState.orders.map((order) => ({
         ...order,
+        businessDate: order.businessDate || toDateKey(order.checkedOutAt || order.paidAt || order.createdAt),
+        orderedAt: order.orderedAt || order.createdAt,
+        paidAt: order.paidAt || order.checkedOutAt || null,
+        entryType: order.entryType || "standard",
+        fulfillmentStatus: order.fulfillmentStatus || (order.status === "paid" ? "completed" : ""),
+        correctionReason: order.correctionReason || "",
+        correctedAt: order.correctedAt || null,
+        voidedAt: order.voidedAt || null,
+        voidReason: order.voidReason || "",
+        previousStatus: order.previousStatus || null,
+        orderNote: order.orderNote || "",
+        updatedAt: order.updatedAt || order.checkedOutAt || order.createdAt,
         companionSeatIds: Array.isArray(order.companionSeatIds) ? order.companionSeatIds : [],
         linkedSeatIds: Array.isArray(order.linkedSeatIds)
           ? order.linkedSeatIds
@@ -310,6 +378,8 @@ function normalizeState(savedState) {
               const fallbackServiceType = order.seatId === TAKEOUT_SEAT_ID ? "外帶" : "內用";
               const itemRequiresTemperature = item.requiresTemperature ?? item.type === "drink";
               const itemRequiresServiceType = item.requiresServiceType ?? item.type !== "retail";
+              const itemCost = parseOptionalCost(item.cost);
+              const itemProfit = itemCost === null ? null : effectivePrice - itemCost;
               const normalized = {
                 ...item,
                 quantity: Number(item.quantity) || 1,
@@ -317,12 +387,12 @@ function normalizeState(savedState) {
                 effectivePrice,
                 iceExtra: Number(item.iceExtra ?? effectivePrice - basePrice) || 0,
                 price: effectivePrice,
-                cost: Number(item.cost) || 0,
-                profit: effectivePrice - (Number(item.cost) || 0),
+                cost: itemCost,
+                profit: itemProfit,
                 supportsHot: item.supportsHot ?? itemRequiresTemperature,
                 supportsIce: item.supportsIce ?? itemRequiresTemperature,
                 supportsTakeout: item.supportsTakeout ?? itemRequiresServiceType,
-                iceExtraPrice: Number(item.iceExtraPrice ?? CATEGORY_METADATA[item.category]?.iceExtraPrice ?? item.iceExtra) || 0,
+                iceExtraPrice: Number(item.iceExtraPrice ?? categoryMetadata(item.category).iceExtraPrice ?? item.iceExtra) || 0,
                 temperature: itemRequiresTemperature ? item.temperature === "冰" ? "冰" : "熱" : "",
                 serviceType: item.serviceType === "外帶" ? "外帶" : fallbackServiceType,
                 requiresTemperature: itemRequiresTemperature,
@@ -382,7 +452,8 @@ function normalizeState(savedState) {
     inventoryLotStatusFilter: ["active", "archived", "all"].includes(savedState.inventoryLotStatusFilter)
       ? savedState.inventoryLotStatusFilter
       : "active",
-    salesSort: savedState.salesSort || "amount"
+    salesSort: savedState.salesSort || "amount",
+    notice: normalizeNotice(savedState.notice)
   };
 }
 
@@ -446,16 +517,44 @@ function minutesBetween(startValue, endValue = new Date()) {
   return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000));
 }
 
+function daysBetween(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  return Math.floor((end.getTime() - start.getTime()) / 86400000);
+}
+
 function stayMinutes(order) {
   return minutesBetween(order.createdAt, order.checkedOutAt || new Date());
 }
 
+function formatDuration(minutes) {
+  const safeMinutes = Math.max(0, Math.floor(Number(minutes) || 0));
+  if (safeMinutes < 60) return `${safeMinutes} 分`;
+  const hours = Math.floor(safeMinutes / 60);
+  const rest = safeMinutes % 60;
+  return rest ? `${hours} 小時 ${rest} 分` : `${hours} 小時`;
+}
+
+function openedDateLabel(order) {
+  const openedKey = toDateKey(order?.createdAt);
+  if (!openedKey || openedKey === todayKey()) return "";
+  if (openedKey === shiftDate(todayKey(), -1)) return "昨天開單";
+  return `${openedKey} 開單`;
+}
+
 function stayLabel(order) {
-  return `已坐 ${stayMinutes(order)} 分鐘`;
+  return openedDateLabel(order) || `已坐 ${formatDuration(stayMinutes(order))}`;
 }
 
 function activeDurationLabel(order) {
-  return order.seatId === TAKEOUT_SEAT_ID ? `已等 ${stayMinutes(order)} 分鐘` : stayLabel(order);
+  const openedLabel = openedDateLabel(order);
+  if (openedLabel) return openedLabel;
+  return order.seatId === TAKEOUT_SEAT_ID ? `已等 ${formatDuration(stayMinutes(order))}` : stayLabel(order);
+}
+
+function completedStayLabel(order) {
+  return `停留 ${formatDuration(stayMinutes(order))}`;
 }
 
 function stayAlertClass(order) {
@@ -546,8 +645,135 @@ function todayOfficialClosing() {
   return state.dailyClosings.find((closing) => closing.date === todayKey() && closing.isOfficial === true) || null;
 }
 
-function isStoreClosedToday() {
-  return Boolean(todayOfficialClosing());
+function officialClosingForDate(date = todayKey()) {
+  return state.dailyClosings.find((closing) => closing.date === date && closing.isOfficial === true) || null;
+}
+
+function orderBusinessDate(order) {
+  return order.businessDate || toDateKey(order.paidAt || order.checkedOutAt || order.createdAt);
+}
+
+function ordersForBusinessDate(dateKey, { includeVoided = false } = {}) {
+  return state.orders.filter((order) => {
+    if (!includeVoided && order.status === "voided") return false;
+    return orderBusinessDate(order) === dateKey;
+  });
+}
+
+function paidOrdersForBusinessDate(dateKey) {
+  return state.orders.filter((order) => order.status === "paid" && orderBusinessDate(order) === dateKey);
+}
+
+function businessEventsForDate(dateKey) {
+  return state.businessEvents.filter((event) => event.date === dateKey);
+}
+
+function paymentMethodLabel(method) {
+  return paymentLabels[method] || method || "未記錄";
+}
+
+function buildPaymentSummary(orders) {
+  return orders.reduce((summary, order) => {
+    const method = order.paymentMethod || "unknown";
+    const current = summary[method] || { method, label: paymentMethodLabel(method), orderCount: 0, amount: 0 };
+    current.orderCount += 1;
+    current.amount += calculateOrder(order).total;
+    summary[method] = current;
+    return summary;
+  }, {});
+}
+
+function paymentSummaryRows(summary = {}) {
+  return Object.values(summary).sort((a, b) => b.amount - a.amount || b.orderCount - a.orderCount);
+}
+
+function firstOrderTimeForDate(dateKey) {
+  const orders = ordersForBusinessDate(dateKey);
+  const first = [...orders].sort((a, b) => new Date(a.orderedAt || a.createdAt) - new Date(b.orderedAt || b.createdAt))[0];
+  return first?.orderedAt || first?.createdAt || "";
+}
+
+function lastPaidTimeForDate(dateKey) {
+  const orders = paidOrdersForBusinessDate(dateKey);
+  const last = [...orders].sort((a, b) => new Date(b.paidAt || b.checkedOutAt) - new Date(a.paidAt || a.checkedOutAt))[0];
+  return last?.paidAt || last?.checkedOutAt || "";
+}
+
+function openOrdersForDate(dateKey = todayKey()) {
+  return state.orders.filter((order) => order.status === "open" && toDateKey(order.createdAt) === dateKey);
+}
+
+function hasBusinessRecordsForDate(dateKey = todayKey()) {
+  return ordersForBusinessDate(dateKey, { includeVoided: true }).length > 0 || businessEventsForDate(dateKey).length > 0;
+}
+
+function dailyOperatingStatus(dateKey = todayKey()) {
+  const closing = officialClosingForDate(dateKey);
+  if (!closing) return { key: hasBusinessRecordsForDate(dateKey) ? "open" : "empty", label: "尚未結帳" };
+  if (isDailyClosingOutdated(closing)) return { key: "outdated", label: "結帳後有異動" };
+  return { key: "closed", label: "今日已結帳" };
+}
+
+function latestChangeAtForDate(dateKey) {
+  const values = [
+    ...ordersForBusinessDate(dateKey, { includeVoided: true }).flatMap((order) => [
+      order.updatedAt,
+      order.correctedAt,
+      order.voidedAt,
+      order.createdAt,
+      order.paidAt,
+      order.checkedOutAt
+    ]),
+    ...businessEventsForDate(dateKey).flatMap((event) => [event.updatedAt, event.createdAt])
+  ].filter(Boolean).map((value) => new Date(value).getTime()).filter(Number.isFinite);
+  return values.length ? new Date(Math.max(...values)).toISOString() : "";
+}
+
+function buildDailySummaryForDate(dateKey) {
+  const orders = paidOrdersForBusinessDate(dateKey);
+  const summary = summarizeOrders(orders);
+  const paymentSummary = buildPaymentSummary(orders);
+  return {
+    ...summary,
+    paymentSummary,
+    customerSourceSummary: buildCustomerSourceSummary(orders, { customerSourceLabels: customerSourceLabelMap() }),
+    businessEventSummary: summarizeBusinessEvents(state.businessEvents, { startDate: dateKey, endDate: dateKey }),
+    openOrderCount: openOrdersForDate(dateKey).length,
+    firstOrderAt: firstOrderTimeForDate(dateKey),
+    lastOrderAt: lastPaidTimeForDate(dateKey),
+    lateEntryCount: orders.filter((order) => order.entryType === "late_entry").length,
+    voidedOrderCount: state.orders.filter((order) => order.status === "voided" && orderBusinessDate(order) === dateKey).length
+  };
+}
+
+function isDailyClosingOutdated(closing) {
+  if (!closing) return false;
+  const latestChange = latestChangeAtForDate(closing.date);
+  if (!latestChange || !closing.closedAt) return false;
+  if (new Date(latestChange) > new Date(closing.closedAt)) return true;
+  const current = buildDailySummaryForDate(closing.date);
+  return (
+    Number(closing.orderCount) !== current.orderCount ||
+    Number(closing.totalSales ?? closing.revenue) !== current.revenue ||
+    Number(closing.openOrderCount || 0) !== current.openOrderCount
+  );
+}
+
+function dailyClosingDiff(dateKey, previousClosing = officialClosingForDate(dateKey)) {
+  const current = buildDailySummaryForDate(dateKey);
+  const previousRevenue = Number(previousClosing?.totalSales ?? previousClosing?.revenue) || 0;
+  const previousOrderCount = Number(previousClosing?.orderCount) || 0;
+  return {
+    previousOrderCount,
+    nextOrderCount: current.orderCount,
+    previousRevenue,
+    nextRevenue: current.revenue,
+    revenueDelta: current.revenue - previousRevenue,
+    lateEntryCount: current.lateEntryCount,
+    voidedOrderCount: current.voidedOrderCount,
+    paymentSummary: current.paymentSummary,
+    businessEventSummary: current.businessEventSummary
+  };
 }
 
 function openTakeoutOrders() {
@@ -560,14 +786,14 @@ function getSelectedOrder() {
   if (state.selectedOrderId) {
     const selected = state.orders.find((order) => order.id === state.selectedOrderId);
     if (selected?.status === "open") return selected;
-    if (selected?.status === "paid" && state.orderDetailMode === "history") return selected;
+    if (["paid", "voided"].includes(selected?.status) && state.orderDetailMode === "history") return selected;
     if (selected && state.activeView !== "floor") return selected;
   }
   return getOpenOrderBySeat(state.selectedSeatId) || null;
 }
 
 function paidOrdersForDate(dateKey) {
-  return state.orders.filter((order) => order.status === "paid" && toDateKey(order.checkedOutAt) === dateKey);
+  return paidOrdersForBusinessDate(dateKey);
 }
 
 function summarizeOrders(orders) {
@@ -577,13 +803,30 @@ function summarizeOrders(orders) {
       stats.revenue += summary.total;
       stats.cost += summary.cost;
       stats.profit += summary.profit;
+      stats.knownCostRevenue += summary.knownCostRevenue;
+      stats.unknownCostRevenue += summary.unknownCostRevenue;
+      stats.unknownCostItems += summary.unknownCostItems;
+      stats.unknownCostQuantity += summary.unknownCostQuantity;
       stats.drinks += summary.drinks;
       stats.desserts += summary.desserts;
-      stats.retail += order.items.reduce((count, item) => count + (item.type === "retail" ? item.quantity : 0), 0);
+      stats.retail += summary.retail;
       stats.orderCount += 1;
       return stats;
     },
-    { revenue: 0, cost: 0, profit: 0, drinks: 0, desserts: 0, retail: 0, orderCount: 0, averageTicket: 0 }
+    {
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+      knownCostRevenue: 0,
+      unknownCostRevenue: 0,
+      unknownCostItems: 0,
+      unknownCostQuantity: 0,
+      drinks: 0,
+      desserts: 0,
+      retail: 0,
+      orderCount: 0,
+      averageTicket: 0
+    }
   );
   stats.averageTicket = stats.orderCount ? stats.revenue / stats.orderCount : 0;
   return stats;
@@ -594,7 +837,8 @@ function salesSummaryForDate(dateKey) {
   paidOrdersForDate(dateKey).forEach((order) => {
     order.items.forEach((item) => {
       const price = Number(item.effectivePrice ?? item.price) || 0;
-      const key = `${item.productId || item.name}-${item.name}-${price}-${item.cost}`;
+      const cost = knownUnitCost(item.cost);
+      const key = `${item.productId || item.name}-${item.name}-${price}-${cost ?? "unknown"}`;
       const current =
         rows.get(key) ||
         {
@@ -603,12 +847,19 @@ function salesSummaryForDate(dateKey) {
           quantity: 0,
           amount: 0,
           cost: 0,
-          profit: 0
+          profit: 0,
+          unknownCostItems: 0,
+          unknownCostQuantity: 0
         };
       current.quantity += item.quantity;
       current.amount += price * item.quantity;
-      current.cost += item.cost * item.quantity;
-      current.profit += (price - item.cost) * item.quantity;
+      if (cost === null) {
+        current.unknownCostItems += 1;
+        current.unknownCostQuantity += item.quantity;
+      } else {
+        current.cost += cost * item.quantity;
+        current.profit += (price - cost) * item.quantity;
+      }
       rows.set(key, current);
     });
   });
@@ -626,6 +877,17 @@ function categoryLabelMap() {
   return Object.fromEntries(categories.map((category) => [category.id, category.name]));
 }
 
+function categoryRank(categoryId) {
+  const index = categories.findIndex((category) => category.id === categoryId);
+  return index === -1 ? categories.length : index;
+}
+
+function nextSortForCategory(categoryId) {
+  return state.products
+    .filter((product) => product.category === categoryId)
+    .reduce((max, product) => Math.max(max, Number(product.sort) || 0), 0) + 1;
+}
+
 function seatLabelMap() {
   return {
     ...Object.fromEntries(state.seats.map((seat) => [seat.id, seat.name])),
@@ -633,17 +895,12 @@ function seatLabelMap() {
   };
 }
 
-function isProductionUrl() {
-  const hostname = window.location.hostname;
-  return PRODUCTION_HOSTS.includes(hostname);
-}
-
-function shouldShowDevBanner() {
-  return APP_BRANCH !== "main" || !isProductionUrl();
-}
-
 function sortedProducts() {
-  return [...state.products].sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, "zh-Hant"));
+  return [...state.products].sort((a, b) => (
+    categoryRank(a.category) - categoryRank(b.category) ||
+    (Number(a.sort) || 0) - (Number(b.sort) || 0) ||
+    a.name.localeCompare(b.name, "zh-Hant")
+  ));
 }
 
 function visibleProducts() {
@@ -917,7 +1174,14 @@ function payOrder() {
     ].join("\n")
   );
   if (!confirmed) return;
-  replaceOrder(checkoutOrder(order, "cash"));
+  const paidOrder = checkoutOrder(order, "cash");
+  replaceOrder({
+    ...paidOrder,
+    businessDate: todayKey(new Date(paidOrder.checkedOutAt)),
+    paidAt: paidOrder.checkedOutAt,
+    fulfillmentStatus: "completed",
+    updatedAt: paidOrder.checkedOutAt
+  });
   setState({ selectedOrderId: null, activeView: "floor", historyDate: todayKey() });
 }
 
@@ -927,14 +1191,22 @@ function lastPaidOrder() {
     .sort((a, b) => new Date(b.checkedOutAt) - new Date(a.checkedOutAt))[0];
 }
 
-function undoLastCheckout() {
-  const order = lastPaidOrder();
+function canUndoCheckout(order) {
+  return Boolean(order?.status === "paid" && order.checkedOutAt && minutesBetween(order.checkedOutAt, new Date()) <= UNDO_CHECKOUT_LIMIT_MINUTES);
+}
+
+function undoCheckoutOrder(orderId) {
+  const order = state.orders.find((item) => item.id === orderId);
   if (!order) {
-    showNotice("目前沒有可撤銷的已結帳訂單。");
+    showNotice("找不到要撤銷的結帳訂單。");
     return;
   }
-  if (minutesBetween(order.checkedOutAt, new Date()) > UNDO_CHECKOUT_LIMIT_MINUTES) {
-    showNotice("最後一筆結帳已超過 5 分鐘，無法撤銷。");
+  if (!canUndoCheckout(order)) {
+    showNotice("此筆結帳已超過 5 分鐘，無法撤銷。");
+    return;
+  }
+  if (officialClosingForDate(orderBusinessDate(order))) {
+    showNotice("此營業日已完成今日結帳，請使用修正或作廢流程，不可直接撤銷結帳。");
     return;
   }
   if (order.seatId !== TAKEOUT_SEAT_ID) {
@@ -944,7 +1216,19 @@ function undoLastCheckout() {
       return;
     }
   }
-  if (!window.confirm("確定要撤銷最後一次結帳嗎？")) return;
+  const summary = calculateOrder(order);
+  const confirmed = window.confirm(
+    [
+      "確定要撤銷這筆結帳嗎？",
+      "",
+      `座位 / 外帶：${orderSeatName(order)}`,
+      `結帳時間：${timeLabel(order.checkedOutAt)}`,
+      `金額：${money.format(summary.total)}`,
+      `原付款方式：${paymentMethodLabel(order.paymentMethod)}`,
+      "撤銷後會回到可編輯狀態。"
+    ].join("\n")
+  );
+  if (!confirmed) return;
   const undoAt = new Date().toISOString();
   setState({
     orders: state.orders.map((item) =>
@@ -954,6 +1238,8 @@ function undoLastCheckout() {
             status: "open",
             paymentMethod: null,
             checkedOutAt: null,
+            paidAt: null,
+            updatedAt: undoAt,
             activityLog: [...(Array.isArray(item.activityLog) ? item.activityLog : []), { type: "undoCheckout", at: undoAt }]
           }
         : item
@@ -964,8 +1250,17 @@ function undoLastCheckout() {
     orderDetailMode: "active",
     orderViewMode: "production",
     historyDate: todayKey(),
-    notice: "已撤銷最後一次結帳。"
+    notice: `已撤銷 ${orderSeatName(order)} 的結帳。`
   });
+}
+
+function undoLastCheckout() {
+  const order = lastPaidOrder();
+  if (!order) {
+    showNotice("目前沒有可撤銷的已結帳訂單。");
+    return;
+  }
+  undoCheckoutOrder(order.id);
 }
 
 function cancelOrder() {
@@ -982,33 +1277,169 @@ function cancelOrder() {
 function editPaidOrder(orderId) {
   const order = state.orders.find((item) => item.id === orderId);
   if (!order || order.status !== "paid") return;
-  const occupiedSeat = order.seatId !== TAKEOUT_SEAT_ID
-    ? orderSeatIds(order).find((seatId) => isSeatOccupied(seatId, order.id))
-    : null;
-  if (occupiedSeat) {
-    showNotice(`${seatName(occupiedSeat)} 已有進行中的訂單，無法轉回編輯。`);
+  const reason = window.prompt("請輸入修正原因（必填）：", order.correctionReason || "");
+  if (!reason?.trim()) {
+    showNotice("修正原因必填。");
     return;
   }
-  if (!window.confirm("要把這張歷史訂單退回可編輯狀態嗎？修改後需要重新結帳。")) return;
+  const paymentMethod = window.prompt("付款方式：cash 或 electronic", order.paymentMethod || "cash");
+  if (paymentMethod === null) return;
+  const normalizedPayment = paymentMethod.trim() === "electronic" ? "electronic" : "cash";
+  const sourceChoices = customerSourceOptions().map(([value, label]) => `${value} = ${label}`).join("\n");
+  const customerSource = window.prompt(`客源來源：\n${sourceChoices}`, normalizeCustomerSource(order.customerSource));
+  if (customerSource === null) return;
+  const normalizedSource = normalizeCustomerSource(customerSource.trim());
+  const sourceNote = window.prompt("客源備註（可空白）：", order.customerSourceNote || "");
+  if (sourceNote === null) return;
+  const orderNote = window.prompt("訂單備註（可空白）：", order.orderNote || "");
+  if (orderNote === null) return;
+  const serviceMode = window.prompt("用餐方式：內用 或 外帶", order.seatId === TAKEOUT_SEAT_ID ? "外帶" : "內用");
+  if (serviceMode === null) return;
+  const nextServiceType = serviceMode.trim() === "外帶" ? "外帶" : "內用";
+  const correctedAt = new Date().toISOString();
   setState({
     orders: state.orders.map((item) =>
       item.id === order.id
-        ? { ...item, status: "open", paymentMethod: null, lastCheckedOutAt: item.checkedOutAt, checkedOutAt: null }
+        ? {
+            ...item,
+            paymentMethod: normalizedPayment,
+            customerSource: normalizedSource,
+            customerSourceNote: sourceNote.trim(),
+            orderNote: orderNote.trim(),
+            correctionReason: reason.trim(),
+            correctedAt,
+            updatedAt: correctedAt,
+            items: item.items.map((line) => ({
+              ...line,
+              serviceType: line.requiresServiceType === false ? line.serviceType : nextServiceType
+            }))
+          }
         : item
     ),
     selectedOrderId: order.id,
-    selectedSeatId: order.seatId,
-    activeView: "floor"
+    activeView: "history",
+    notice: "已修正訂單資訊。若該日已結帳，請重新完成今日結帳。"
   });
 }
 
-function deleteOrder(orderId) {
-  if (!state.orders.some((item) => item.id === orderId)) return;
-  if (!window.confirm("確定刪除這筆訂單紀錄嗎？這個動作無法復原。")) return;
+function voidOrder(orderId) {
+  const order = state.orders.find((item) => item.id === orderId);
+  if (!order || order.status !== "paid") return;
+  const reason = window.prompt("請輸入作廢原因（必填）。Void ≠ Refund，本系統不會處理退款：", "");
+  if (!reason?.trim()) {
+    showNotice("作廢原因必填。");
+    return;
+  }
+  const voidedAt = new Date().toISOString();
   setState({
-    orders: state.orders.filter((item) => item.id !== orderId),
+    orders: state.orders.map((item) => (
+      item.id === orderId
+        ? {
+            ...item,
+            status: "voided",
+            previousStatus: item.status,
+            voidedAt,
+            voidReason: reason.trim(),
+            updatedAt: voidedAt
+          }
+        : item
+    )),
     selectedOrderId: state.selectedOrderId === orderId ? null : state.selectedOrderId,
-    activeView: "history"
+    activeView: "history",
+    notice: "訂單已作廢。Void 不代表退款；若該日已結帳，請重新完成今日結帳。"
+  });
+}
+
+function saveLateEntry() {
+  const form = document.querySelector("#late-entry-form");
+  if (!form) return;
+  const data = new FormData(form);
+  const businessDate = String(data.get("businessDate") || todayKey());
+  const approximateTime = String(data.get("approximateTime") || "12:00");
+  const product = getProduct(String(data.get("productId") || ""));
+  const quantity = Math.max(1, Math.trunc(Number(data.get("quantity")) || 1));
+  const receivedAmount = Number(data.get("receivedAmount")) || 0;
+  const correctionReason = String(data.get("correctionReason") || "").trim();
+  const note = String(data.get("note") || "").trim();
+  const serviceType = String(data.get("serviceType") || "外帶") === "內用" ? "內用" : "外帶";
+  const customerSource = normalizeCustomerSource(String(data.get("customerSource") || "not_asked"));
+  const paymentMethod = String(data.get("paymentMethod") || "cash") === "electronic" ? "electronic" : "cash";
+  if (!product) {
+    showNotice("補登訂單請選擇商品。");
+    return;
+  }
+  if (receivedAmount <= 0) {
+    showNotice("補登訂單請填寫實際收款金額。");
+    return;
+  }
+  if (!correctionReason) {
+    showNotice("補單原因必填。");
+    return;
+  }
+  const orderedAt = new Date(`${businessDate}T${approximateTime || "12:00"}:00`).toISOString();
+  const now = new Date().toISOString();
+  const unitPrice = receivedAmount / quantity;
+  const productCost = knownUnitCost(product.cost);
+  const lateOrder = {
+    id: `YT-LATE-${businessDate.replace(/-/g, "")}-${String(Date.now()).slice(-5)}`,
+    createdAt: now,
+    orderedAt,
+    paidAt: orderedAt,
+    checkedOutAt: orderedAt,
+    businessDate,
+    seatId: serviceType === "外帶" ? TAKEOUT_SEAT_ID : "",
+    seatSnapshot: serviceType,
+    people: 1,
+    items: [
+      {
+        lineId: `late-line-${Date.now()}`,
+        productId: product.id,
+        name: product.name,
+        variantName: "",
+        category: product.category,
+        type: product.type,
+        quantity,
+        requiresTemperature: product.requiresTemperature ?? product.type === "drink",
+        requiresServiceType: product.requiresServiceType ?? product.type !== "retail",
+        supportsHot: product.supportsHot,
+        supportsIce: product.supportsIce,
+        temperature: product.type === "drink" ? "熱" : "",
+        serviceType,
+        basePrice: unitPrice,
+        effectivePrice: unitPrice,
+        iceExtraPrice: Number(product.iceExtraPrice) || 0,
+        iceExtra: 0,
+        price: unitPrice,
+        cost: productCost,
+        profit: productCost === null ? null : unitPrice - productCost,
+        served: true,
+        note
+      }
+    ],
+    activityLog: [{ type: "lateEntry", at: now, reason: correctionReason }],
+    status: "paid",
+    fulfillmentStatus: "completed",
+    entryType: "late_entry",
+    paymentMethod,
+    customerSource,
+    customerSourceNote: "",
+    correctionReason,
+    correctedAt: now,
+    updatedAt: now,
+    orderNote: note,
+    voidedAt: null,
+    voidReason: "",
+    previousStatus: null
+  };
+  const daysAgo = daysBetween(businessDate, todayKey());
+  if (daysAgo > 7) {
+    window.alert("你正在補登較早日期的交易。此操作會改變該日營收與分析結果。");
+  }
+  setState({
+    orders: [lateOrder, ...state.orders],
+    activeView: "daily-closing",
+    historyDate: businessDate,
+    notice: "已補登歷史完成訂單。若該日已結帳，請重新完成今日結帳。"
   });
 }
 
@@ -1016,7 +1447,9 @@ function buildProductFromForm() {
   const form = document.querySelector(".product-form");
   const existing = form?.dataset?.editing ? getProduct(form.dataset.editing) : null;
   const existingVariants = normalizeVariants(existing?.variants);
+  const selectedCategory = document.querySelector("#product-category").value;
   const selectedType = document.querySelector("#product-type").value;
+  const categoryChanged = Boolean(existing && existing.category !== selectedCategory);
   const nextVariantNames = document
     .querySelector("#product-variants")
     .value.split(/[\n,，、]/)
@@ -1024,15 +1457,15 @@ function buildProductFromForm() {
     .filter(Boolean);
   return {
     name: document.querySelector("#product-name").value.trim(),
-    category: document.querySelector("#product-category").value,
+    category: selectedCategory,
     type: selectedType,
     price: Number(document.querySelector("#product-price").value),
-    cost: Number(document.querySelector("#product-cost").value),
+    cost: parseOptionalCost(document.querySelector("#product-cost").value),
     supportsHot: selectedType === "drink" && document.querySelector("#product-supports-hot").checked,
     supportsIce: selectedType === "drink" && document.querySelector("#product-supports-ice").checked,
-    supportsTakeout: document.querySelector("#product-supports-takeout").checked,
+    supportsTakeout: existing?.supportsTakeout ?? selectedType !== "retail",
     iceExtraPrice: selectedType === "drink" ? Number(document.querySelector("#product-ice-extra-price").value) || 0 : 0,
-    sort: Number(document.querySelector("#product-sort").value) || state.products.length + 1,
+    sort: existing && !categoryChanged ? Number(existing.sort) || nextSortForCategory(selectedCategory) : nextSortForCategory(selectedCategory),
     note: document.querySelector("#product-note").value.trim(),
     variants: nextVariantNames.map((name) => existingVariants.find((variant) => variant.name === name) || name),
     active: document.querySelector("#product-active").checked
@@ -1041,8 +1474,9 @@ function buildProductFromForm() {
 
 function saveProduct(productId = null) {
   const next = buildProductFromForm();
-  if (!next.name || Number.isNaN(next.price) || Number.isNaN(next.cost)) {
-    window.alert("請輸入品名、售價與成本。");
+  const rawPrice = String(document.querySelector("#product-price")?.value ?? "").trim();
+  if (!next.name || rawPrice === "" || Number.isNaN(next.price) || next.price < 0) {
+    window.alert("請輸入品名與有效售價。成本可留空代表未知。");
     return;
   }
 
@@ -1161,19 +1595,30 @@ function toggleProduct(productId) {
 }
 
 function openProductEditor(productId) {
-  setState({ activeView: "products", editingProductId: productId || null });
+  const product = productId ? getProduct(productId) : null;
+  setState({
+    activeView: "products",
+    editingProductId: productId || null,
+    selectedCategoryId: product?.category || state.selectedCategoryId
+  });
 }
 
 function downloadJson(filename, data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  try {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (error) {
+    console.warn("[YUTU POS] JSON download failed.", error);
+    return false;
+  }
 }
 
 function timestampForFile(date = new Date()) {
@@ -1214,27 +1659,46 @@ function exportSettingsSnapshot(source = state) {
 }
 
 function buildDailyClosingSnapshot(date = todayKey(), exportedAt = new Date().toISOString(), note = "", version = 1) {
-  const orders = paidOrdersForDate(date);
-  const summary = summarizeOrders(orders);
+  const orders = paidOrdersForBusinessDate(date);
+  const summary = buildDailySummaryForDate(date);
+  const previousClosing = officialClosingForDate(date);
+  const diff = dailyClosingDiff(date, previousClosing);
   return {
     id: `closing-${date}-${exportedAt.replace(/[:.]/g, "-")}`,
     date,
+    businessDate: date,
     closedAt: exportedAt,
     version,
     status: "official",
     isOfficial: true,
     supersededBy: null,
+    supersedesId: previousClosing?.id || null,
     supersededAt: null,
     orderCount: summary.orderCount,
     totalSales: summary.revenue,
+    revenue: summary.revenue,
     totalCost: summary.cost,
     grossProfit: summary.profit,
     grossMargin: summary.revenue ? summary.profit / summary.revenue : 0,
+    knownCostRevenue: summary.knownCostRevenue,
+    knownGrossMargin: summary.knownCostRevenue ? summary.profit / summary.knownCostRevenue : 0,
+    unknownCostRevenue: summary.unknownCostRevenue,
+    unknownCostItems: summary.unknownCostItems,
+    unknownCostQuantity: summary.unknownCostQuantity,
+    paymentSummary: summary.paymentSummary,
+    customerSourceSummary: summary.customerSourceSummary,
+    businessEventSummary: summary.businessEventSummary,
+    openOrderCount: summary.openOrderCount,
+    snapshotVersion: 1,
+    changeSummary: previousClosing ? diff : null,
     drinkCount: summary.drinks,
     dessertCount: summary.desserts,
     retailCount: summary.retail,
     exported: true,
+    backupStatus: "pending",
+    backupDownloadedAt: null,
     exportedAt,
+    createdAt: exportedAt,
     note
   };
 }
@@ -1276,6 +1740,43 @@ function buildFullBackupPayload() {
 
 function exportAllData() {
   downloadJson(`yutu-pos-backup-${timestampForFile()}.json`, buildFullBackupPayload());
+}
+
+function markClosingBackupDownloaded(closingId, downloaded) {
+  setState({
+    dailyClosings: state.dailyClosings.map((closing) => (
+      closing.id === closingId
+        ? {
+            ...closing,
+            backupStatus: downloaded ? "downloaded" : "pending",
+            backupDownloadedAt: downloaded ? new Date().toISOString() : closing.backupDownloadedAt || null
+          }
+        : closing
+    ))
+  });
+}
+
+function downloadFullBackupForClosing(closingId = "") {
+  const downloaded = downloadJson(`yutu-pos-backup-${timestampForFile()}.json`, buildFullBackupPayload());
+  if (closingId) {
+    setState({
+      dailyClosings: state.dailyClosings.map((closing) => (
+        closing.id === closingId
+          ? {
+              ...closing,
+              backupStatus: downloaded ? "downloaded" : "pending",
+              backupDownloadedAt: downloaded ? new Date().toISOString() : closing.backupDownloadedAt || null
+            }
+          : closing
+      )),
+      notice: downloaded ? "完整備份已重新下載。" : "備份尚未成功下載，請稍後再試。"
+    });
+  } else {
+    setState({
+      notice: downloaded ? "完整備份已下載。" : "備份尚未成功下載，請稍後再試。"
+    });
+  }
+  return downloaded;
 }
 
 function buildDailyReportPayload(date = todayKey()) {
@@ -1333,7 +1834,7 @@ function exportClosingReport() {
 function closeStoreWorkflow() {
   const openOrders = state.orders.filter((order) => order.status === "open");
   if (openOrders.length) {
-    showNotice("仍有未結帳桌位，請先完成結帳或取消訂單後再關店。");
+    showNotice(`仍有 ${openOrders.length} 筆未結帳訂單，請先完成結帳或取消訂單後再完成今日結帳。`);
     return;
   }
   const date = todayKey();
@@ -1348,13 +1849,15 @@ function closeStoreWorkflow() {
     .reduce((total, order) => total + calculateOrder(order).total, 0);
   const confirmed = window.confirm(
     [
-      "確認今日營業資料並關店？",
+      "確認今日營業資料並完成今日結帳？",
       "",
       `今日營收：${money.format(summary.revenue)}`,
       `訂單數：${summary.orderCount}`,
       `現金收入：${money.format(cashSales)}`,
       `電子支付：${money.format(electronicSales)}`,
-      `今日 Business Events：${businessEvents.length} 筆`
+      `今日 Business Events：${businessEvents.length} 筆`,
+      "",
+      "完成後會建立 DailyClosing，並下載完整 Full Backup。"
     ].join("\n")
   );
   if (!confirmed) return;
@@ -1362,12 +1865,78 @@ function closeStoreWorkflow() {
   const exportedAt = new Date().toISOString();
   const version = state.dailyClosings.filter((closing) => closing.date === date).length + 1;
   const dailyClosing = buildDailyClosingSnapshot(date, exportedAt, "", version);
-  setState({
-    dailyClosings: applyOfficialDailyClosing(dailyClosing, state.dailyClosings, exportedAt),
-    activeView: "floor",
-    notice: "今日已關店，daily archive 已匯出。"
+  const nextClosings = applyOfficialDailyClosing(dailyClosing, state.dailyClosings, exportedAt);
+  state = normalizeState({
+    ...state,
+    dailyClosings: nextClosings,
+    activeView: "daily-closing",
+    notice: "今日已結帳，正在下載完整備份。"
   });
-  downloadJson(`yutu-pos-daily-archive-${date}.json`, buildDailyArchivePayload(date, dailyClosing, exportedAt));
+  saveState(state);
+  const downloaded = downloadJson(`yutu-pos-backup-${timestampForFile(new Date(exportedAt))}.json`, buildFullBackupPayload());
+  setState({
+    dailyClosings: state.dailyClosings.map((closing) => (
+      closing.id === dailyClosing.id
+        ? {
+            ...closing,
+            backupStatus: downloaded ? "downloaded" : "pending",
+            backupDownloadedAt: downloaded ? new Date().toISOString() : null
+          }
+        : closing
+    )),
+    activeView: "daily-closing",
+    notice: downloaded ? "今日已結帳，完整備份已下載。" : "今日已結帳，但備份尚未成功下載。請重新下載完整備份。"
+  });
+}
+
+function regenerateDailyClosing(date = todayKey()) {
+  const previousClosing = officialClosingForDate(date);
+  if (!previousClosing) {
+    showNotice("此日期尚無 official DailyClosing，請先完成今日結帳。");
+    return;
+  }
+  const diff = dailyClosingDiff(date, previousClosing);
+  const confirmed = window.confirm(
+    [
+      `重新完成 ${date} 今日結帳？`,
+      "",
+      `原訂單數：${diff.previousOrderCount}`,
+      `新訂單數：${diff.nextOrderCount}`,
+      `原營收：${money.format(diff.previousRevenue)}`,
+      `新營收：${money.format(diff.nextRevenue)}`,
+      `營收差額：${money.format(diff.revenueDelta)}`,
+      `補登訂單：${diff.lateEntryCount}`,
+      `作廢訂單：${diff.voidedOrderCount}`,
+      "",
+      "舊 official 會改為 superseded，並保留歷史版本。"
+    ].join("\n")
+  );
+  if (!confirmed) return;
+  const exportedAt = new Date().toISOString();
+  const version = state.dailyClosings.filter((closing) => closing.date === date).length + 1;
+  const dailyClosing = buildDailyClosingSnapshot(date, exportedAt, "regenerated", version);
+  const nextClosings = applyOfficialDailyClosing(dailyClosing, state.dailyClosings, exportedAt);
+  state = normalizeState({
+    ...state,
+    dailyClosings: nextClosings,
+    activeView: "daily-closing",
+    notice: "已重新完成今日結帳，正在下載完整備份。"
+  });
+  saveState(state);
+  const downloaded = downloadJson(`yutu-pos-backup-${timestampForFile(new Date(exportedAt))}.json`, buildFullBackupPayload());
+  setState({
+    dailyClosings: state.dailyClosings.map((closing) => (
+      closing.id === dailyClosing.id
+        ? {
+            ...closing,
+            backupStatus: downloaded ? "downloaded" : "pending",
+            backupDownloadedAt: downloaded ? new Date().toISOString() : null
+          }
+        : closing
+    )),
+    activeView: "daily-closing",
+    notice: downloaded ? "已重新完成今日結帳，完整備份已下載。" : "已重新完成今日結帳，但備份尚未成功下載。"
+  });
 }
 
 function validateImportedState(input) {
@@ -1439,7 +2008,8 @@ function renderStats() {
   return `
     <section class="stats" aria-label="今日統計">
       <article><span>今日營收</span><strong>${money.format(stats.revenue)}</strong></article>
-      <article><span>今日毛利</span><strong>${money.format(stats.profit)}</strong></article>
+      <article><span>今日已知毛利</span><strong>${money.format(stats.profit)}</strong></article>
+      <article><span>未知成本品項</span><strong>${stats.unknownCostQuantity}</strong></article>
       <article><span>飲品杯數</span><strong>${stats.drinks}</strong></article>
       <article><span>甜品數</span><strong>${stats.desserts}</strong></article>
     </section>
@@ -1515,12 +2085,71 @@ function orderNextAction(order) {
 function renderWorkspaceStatus() {
   const overview = workspaceOverview();
   return `
-    <section class="workspace-status" aria-label="營業狀態">
-      <article><span>空位</span><strong>${overview.emptySeats}</strong></article>
-      <article><span>進行中</span><strong>${overview.openOrders.length}</strong></article>
-      <article><span>待出品</span><strong>${overview.pendingItems}</strong></article>
-      <article><span>可結帳</span><strong>${overview.readyOrders}</strong></article>
+    <section class="workspace-status-block" aria-label="今日狀態">
+      <div class="workspace-status-title">
+        <h3>今日狀態</h3>
+        <span>一眼確認空位、待出品與可結帳桌</span>
+      </div>
+      <div class="workspace-status">
+        <article><span>空位</span><strong>${overview.emptySeats}</strong></article>
+        <article><span>進行中</span><strong>${overview.openOrders.length}</strong></article>
+        <article><span>待出品</span><strong>${overview.pendingItems}</strong></article>
+        <article><span>可結帳</span><strong>${overview.readyOrders}</strong></article>
+      </div>
     </section>
+  `;
+}
+
+function renderWorkspaceNav() {
+  const groups = [
+    {
+      title: "營業",
+      items: [
+        { action: "floor", label: "POS 工作台" },
+        { action: "history", label: "訂單歷史" },
+        { action: "daily-closing", label: "今日結帳" }
+      ]
+    },
+    {
+      title: "紀錄與庫存",
+      items: [
+        { action: "business-events", label: "營運事件" },
+        { action: "inventory-lots", label: "庫存現況" }
+      ]
+    },
+    {
+      title: "管理與分析",
+      items: [
+        { action: "products", label: "商品" },
+        { action: "analytics", label: "經營分析" }
+      ]
+    },
+    {
+      title: "系統",
+      items: [{ action: "backup", label: "資料與設定" }]
+    }
+  ];
+  return `
+    <nav class="workspace-nav" aria-label="主要功能">
+      ${groups
+        .map(
+          (group) => `
+            <div class="nav-group">
+              <span>${group.title}</span>
+              <div>
+                ${group.items
+                  .map(
+                    (item) => `
+                      <button class="ghost ${state.activeView === item.action ? "active" : ""}" data-action="${item.action}">${item.label}</button>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </nav>
   `;
 }
 
@@ -1542,14 +2171,13 @@ function renderSeats() {
             const stayClass = order ? stayAlertClass(order) : "";
             return `
               <button class="seat ${order ? "occupied" : ""} status-${status.key} ${stayClass} ${seat.id === state.selectedSeatId ? "selected" : ""}" data-action="seat" data-id="${seat.id}">
-                <span class="seat-top"><span class="seat-icon">${seat.icon}</span><span class="seat-status">${status.label}</span></span>
-                <span class="seat-name">${seat.name}</span>
+                <span class="seat-top"><span class="seat-name">${seat.name}</span><span class="seat-status">${status.label}</span></span>
                 ${
                   order
-                    ? `<span class="seat-meta">${order.people}人 · ${timeLabel(order.createdAt)}</span>
-                       <span class="seat-stay">${activeDurationLabel(order)}</span>
+                    ? `<span class="seat-meta">${order.people}人</span>
+                       <span class="seat-stay">開單 ${timeLabel(order.createdAt)} · ${activeDurationLabel(order)}</span>
                        <strong class="seat-total">${money.format(summary.total)}</strong>`
-                    : `<span class="seat-meta">${status.hint}</span><span class="seat-stay">目前空位</span><strong class="seat-total subtle">開始</strong>`
+                    : `<span class="seat-meta">空位</span><span class="seat-stay"></span><strong class="seat-total subtle">開始</strong>`
                 }
               </button>
             `;
@@ -1725,7 +2353,7 @@ function productionGroups(order) {
 
 function renderProductionList(order) {
   const groups = productionGroups(order);
-  const paid = order.status === "paid";
+  const paid = ["paid", "voided"].includes(order.status);
   const orderedGroups = [...categories.map((category) => category.name), "其他"];
   return `
     <section class="production-list">
@@ -1797,9 +2425,22 @@ function renderCustomerSource(order, paid) {
               Note
               <input value="${safeNote}" placeholder="Optional" data-action="customer-source-note" data-id="${order.id}" />
             </label>`
-          : ""
-      }
+      : ""
+  }
     </section>
+  `;
+}
+
+function renderOrderInfoPanel(order, paid) {
+  const source = normalizeCustomerSource(order.customerSource);
+  return `
+    <details class="order-info-panel">
+      <summary>
+        <span>訂單資訊</span>
+        <small>客源：${customerSourceLabel(source)}</small>
+      </summary>
+      ${renderCustomerSource(order, paid)}
+    </details>
   `;
 }
 
@@ -1829,11 +2470,10 @@ function renderOrderQueue() {
                     <button class="queue-order status-${status.key} ${selected ? "selected" : ""}" data-action="select-order" data-id="${order.id}">
                       <span class="queue-order-index">${index + 1}</span>
                       <div>
-                        <strong>${orderSeatName(order)}</strong>
-                        <small>${order.people}人｜${activeDurationLabel(order)}｜開單 ${timeLabel(order.createdAt)}</small>
-                        <small>${orderItemCountSummary(order)}</small>
+                        <span class="queue-order-row"><strong>${orderSeatName(order)}</strong><em>${status.label}</em></span>
+                        <small>${order.people}人 · ${orderItemCountSummary(order)}</small>
+                        <small class="queue-time">開單 ${timeLabel(order.createdAt)} · ${activeDurationLabel(order)}</small>
                       </div>
-                      <span class="queue-order-action">${status.label} · ${orderNextAction(order)}</span>
                     </button>
                   `;
                 })
@@ -1849,7 +2489,7 @@ function renderOrderQueue() {
 function renderOrder() {
   const order = getSelectedOrder();
   if (!order) {
-    return `<aside class="order-panel empty"><span>選擇桌位或工作</span><strong>從 Workspace 開始處理下一步</strong></aside>`;
+    return `<aside class="order-panel empty"><span>尚未選擇訂單</span><strong>點選座位、外帶訂單或 Order Queue 開始處理。</strong></aside>`;
   }
   const summary = calculateOrder(order);
   const paid = order.status === "paid";
@@ -1866,16 +2506,19 @@ function renderOrder() {
         <div>
           <span>${seatIcon(order)} ${orderSeatName(order)} · ${status.label}</span>
           <strong>${order.people}人 · 開單 ${timeLabel(order.createdAt)}</strong>
-          ${paid ? `<span>結帳 ${timeLabel(order.checkedOutAt)} · 停留 ${stayMinutes(order)} 分鐘 · ${order.paymentMethod === "cash" ? "現金" : order.paymentMethod || "未記錄付款"}</span>` : `<span>${activeDurationLabel(order)}</span>`}
+          ${paid ? `<span>${order.status === "voided" ? "已作廢" : "結帳"} ${timeLabel(order.paidAt || order.checkedOutAt || order.voidedAt)} · ${completedStayLabel(order)} · ${paymentMethodLabel(order.paymentMethod)}</span>` : `<span>${activeDurationLabel(order)}</span>`}
           ${paid && activityLogText(order) ? `<span>${activityLogText(order)}</span>` : ""}
         </div>
         <button class="ghost" data-action="floor">座位</button>
       </div>
-      ${renderCustomerSource(order, paid)}
+      ${renderOrderInfoPanel(order, paid)}
       ${
         !paid && order.seatId !== TAKEOUT_SEAT_ID
-          ? `<section class="order-actions-panel">
-              <span>桌位操作</span>
+          ? `<details class="order-actions-panel">
+              <summary>
+                <span>桌位操作</span>
+                ${linkedSeats.length ? `<small>已加 ${linkedSeats.length} 桌</small>` : `<small>換桌 / 新增使用桌位</small>`}
+              </summary>
               ${linkedSeats.length ? `<small>使用桌位：${linkedSeats.map((seat) => seat.name).join("、")}</small>` : ""}
               <div>
                 <button class="secondary" data-action="move-table">換桌</button>
@@ -1888,24 +2531,29 @@ function renderOrder() {
                     </div>`
                   : ""
               }
-            </section>`
+            </details>`
           : ""
       }
-      <div class="order-view-toggle">
-        <button class="${showProductionList ? "active" : ""}" data-action="order-view" data-value="production">出品清單</button>
-        <button class="${!showProductionList ? "active" : ""}" data-action="order-view" data-value="edit">編輯訂單</button>
-      </div>
+      <section class="order-operation-panel">
+        <span>訂單操作</span>
+        <div class="order-view-toggle">
+          <button class="${showProductionList ? "active" : ""}" data-action="order-view" data-value="production">出品清單</button>
+          <button class="${!showProductionList ? "active" : ""}" data-action="order-view" data-value="edit">編輯訂單</button>
+        </div>
+      </section>
       <div class="line-list">${showProductionList ? renderProductionList(order) : renderOrderItems(order, paid)}</div>
       <div class="checkout">
         <div><span>總金額</span><strong>${money.format(summary.total)}</strong></div>
-        <div><span>${showProductionList ? "下一步" : "毛利"}</span><strong>${showProductionList ? status.hint : money.format(summary.profit)}</strong></div>
+        <div><span>${showProductionList ? "下一步" : "已知毛利"}</span><strong>${showProductionList ? status.hint : money.format(summary.profit)}</strong></div>
         ${
           paid
-            ? readonlyHistory
+            ? order.status === "voided"
+              ? `<button class="paid" disabled>已作廢 · Void ≠ Refund</button>`
+              : readonlyHistory
               ? `<button class="paid" disabled>已結帳 · 現金</button>`
               : `<button class="paid" disabled>已結帳 · 現金</button>
-                 <button class="secondary" data-action="edit-paid" data-id="${order.id}">編輯訂單</button>
-                 <button class="secondary danger-action" data-action="delete-order" data-id="${order.id}">刪除紀錄</button>`
+                 <button class="secondary" data-action="edit-paid" data-id="${order.id}">修正資訊</button>
+                 <button class="secondary danger-action" data-action="void-order" data-id="${order.id}">作廢訂單</button>`
             : `<button class="primary" data-action="checkout" ${order.items.length === 0 ? "disabled" : ""}>現金結帳</button>
                <button class="secondary danger-action" data-action="cancel-order">取消客人</button>`
         }
@@ -1916,18 +2564,17 @@ function renderOrder() {
 
 function renderProductManagement() {
   const editing = state.editingProductId ? getProduct(state.editingProductId) : null;
+  const defaults = productMetadataDefaults({ category: state.selectedCategoryId });
   const form = editing || {
     name: "",
     category: state.selectedCategoryId,
-    type: "drink",
+    type: defaults.type || "drink",
     price: "",
     cost: "",
-    supportsHot: true,
-    supportsIce: true,
-    supportsTakeout: true,
-    iceExtraPrice: CATEGORY_METADATA[state.selectedCategoryId]?.iceExtraPrice || 0,
+    supportsHot: defaults.supportsHot,
+    supportsIce: defaults.supportsIce,
+    iceExtraPrice: defaults.iceExtraPrice,
     active: true,
-    sort: state.products.length + 1,
     note: "",
     variants: []
   };
@@ -1942,12 +2589,10 @@ function renderProductManagement() {
         <label>類別<select id="product-category">${categories.map((category) => `<option value="${category.id}" ${category.id === form.category ? "selected" : ""}>${category.name}</option>`).join("")}</select></label>
         <label>類型<select id="product-type">${Object.entries(typeLabels).map(([value, label]) => `<option value="${value}" ${value === form.type ? "selected" : ""}>${label}</option>`).join("")}</select></label>
         <label>售價<input id="product-price" type="number" step="0.001" value="${form.price}" /></label>
-        <label>成本<input id="product-cost" type="number" step="0.001" value="${form.cost}" /></label>
+        <label>成本<input id="product-cost" type="number" step="0.001" value="${form.cost ?? ""}" placeholder="留空代表未知" /></label>
         <label>冰飲加價<input id="product-ice-extra-price" type="number" step="1" value="${Number(form.iceExtraPrice) || 0}" /></label>
-        <label>排序<input id="product-sort" type="number" step="1" value="${form.sort}" /></label>
         <label class="check-row"><input id="product-supports-hot" type="checkbox" ${form.supportsHot !== false ? "checked" : ""} /> 可做熱飲</label>
         <label class="check-row"><input id="product-supports-ice" type="checkbox" ${form.supportsIce !== false ? "checked" : ""} /> 可做冰飲</label>
-        <label class="check-row"><input id="product-supports-takeout" type="checkbox" ${form.supportsTakeout !== false ? "checked" : ""} /> 可外帶</label>
         <label class="wide">口味 / 規格<textarea id="product-variants" placeholder="焙茶、伯爵">${variantNames(form).join("\n")}</textarea></label>
         <label class="wide">備註<input id="product-note" value="${form.note || ""}" /></label>
         <label class="check-row"><input id="product-active" type="checkbox" ${form.active !== false ? "checked" : ""} /> 販售中</label>
@@ -1961,11 +2606,10 @@ function renderProductManagement() {
               <article class="admin-product ${product.active ? "" : "inactive"}">
                 <div>
                   <strong>${product.sort}. ${product.name}</strong>
-                  <span>${categoryName(product.category)} · ${typeLabels[product.type]} · ${money.format(product.price)} / 成本 ${money.format(product.cost)}</span>
+                  <span>${categoryName(product.category)} · ${typeLabels[product.type]} · ${money.format(product.price)} / ${formatCost(product.cost)}</span>
                   <small>${[
                     product.supportsHot ? "熱" : "",
                     product.supportsIce ? "冰" : "",
-                    product.supportsTakeout ? "可外帶" : "",
                     product.iceExtraPrice ? `冰飲 +${money.format(product.iceExtraPrice)}` : ""
                   ].filter(Boolean).join(" · ") || "無點餐選項"}</small>
                   ${variantNames(product).length ? `<small>口味 / 規格：${variantNames(product).join("、")}</small>` : ""}
@@ -1984,14 +2628,22 @@ function renderProductManagement() {
 
 function renderHistory() {
   const paidOrders = paidOrdersForDate(state.historyDate);
+  const voidedOrders = state.orders.filter((order) => order.status === "voided" && orderBusinessDate(order) === state.historyDate);
+  const visibleOrders = [...paidOrders, ...voidedOrders].sort((a, b) => new Date(b.paidAt || b.checkedOutAt || b.voidedAt || b.createdAt) - new Date(a.paidAt || a.checkedOutAt || a.voidedAt || a.createdAt));
   const stats = summarizeOrders(paidOrders);
   const rows = salesSummaryForDate(state.historyDate);
+  const undoCandidate = lastPaidOrder();
+  const showUndo = canUndoCheckout(undoCandidate);
   return `
     <section class="history">
       <div class="section-title">
-        <h2>銷售紀錄 / 日報</h2>
+        <h2>訂單歷史</h2>
         <div class="actions">
-          <button class="ghost" data-action="undo-checkout">撤銷最後結帳</button>
+          ${
+            showUndo
+              ? `<button class="ghost danger-action" data-action="undo-order-checkout" data-id="${undoCandidate.id}">撤銷此筆結帳：${orderSeatName(undoCandidate)} · ${money.format(calculateOrder(undoCandidate).total)}</button>`
+              : ""
+          }
           <button class="ghost" data-action="floor">返回點餐</button>
         </div>
       </div>
@@ -2003,7 +2655,8 @@ function renderHistory() {
       </div>
       <section class="stats report-stats" aria-label="指定日期統計">
         <article><span>營業額</span><strong>${money.format(stats.revenue)}</strong></article>
-        <article><span>毛利</span><strong>${money.format(stats.profit)}</strong></article>
+        <article><span>已知毛利</span><strong>${money.format(stats.profit)}</strong></article>
+        <article><span>未知成本品項</span><strong>${stats.unknownCostQuantity}</strong></article>
         <article><span>訂單數</span><strong>${stats.orderCount}</strong></article>
         <article><span>飲品杯數</span><strong>${stats.drinks}</strong></article>
         <article><span>甜品數</span><strong>${stats.desserts}</strong></article>
@@ -2017,28 +2670,38 @@ function renderHistory() {
       <div class="sales-table">
         ${
           rows.length
-            ? `<article class="sales-header"><strong>商品名稱</strong><span>類別</span><span>數量</span><span>銷售金額</span><span>成本</span><span>毛利</span></article>
-               ${rows.map((row) => `<article><strong>${row.name}</strong><span>${row.category}</span><span>${row.quantity}</span><span>${money.format(row.amount)}</span><span>${money.format(row.cost)}</span><span>${money.format(row.profit)}</span></article>`).join("")}`
+            ? `<article class="sales-header"><strong>商品名稱</strong><span>類別</span><span>數量</span><span>銷售金額</span><span>已知成本</span><span>已知毛利</span></article>
+               ${rows.map((row) => `<article><strong>${row.name}</strong><span>${row.category}</span><span>${row.quantity}${row.unknownCostQuantity ? `（未知成本 ${row.unknownCostQuantity}）` : ""}</span><span>${money.format(row.amount)}</span><span>${money.format(row.cost)}</span><span>${money.format(row.profit)}</span></article>`).join("")}`
             : `<div class="empty-note">此日期尚無銷售紀錄</div>`
         }
       </div>
       <div class="section-title compact"><h2>訂單明細</h2></div>
       <div class="history-list">
         ${
-          paidOrders.length
-            ? paidOrders
+          visibleOrders.length
+            ? visibleOrders
                 .map((order) => {
                   const summary = calculateOrder(order);
                   const sourceText = `客源：${customerSourceLabel(order.customerSource)}${order.customerSourceNote ? ` (${escapeHtml(order.customerSourceNote)})` : ""}`;
+                  const badges = [
+                    order.entryType === "late_entry" ? "補登訂單" : "一般已結帳",
+                    order.status === "voided" ? "已作廢" : "",
+                    order.correctedAt ? "曾修正" : ""
+                  ].filter(Boolean).join(" · ");
                   return `
-                    <article class="history-item">
+                    <article class="history-item ${order.status === "voided" ? "voided" : ""}">
                       <button class="history-open" data-action="open-history" data-id="${order.id}">
-                        <span>${timeLabel(order.checkedOutAt || order.createdAt)} · ${seatName(order)} · ${order.people}人</span>
+                        <span>${timeLabel(order.paidAt || order.checkedOutAt || order.createdAt)} · ${order.seatSnapshot || seatName(order)} · ${order.people}人</span>
                         <strong>${money.format(summary.total)}</strong>
+                        <small>${badges}${order.voidReason ? ` · 作廢原因：${escapeHtml(order.voidReason)}` : ""}</small>
                         <small>${sourceText}</small>
-                        <small>${productSummaryText(order) || "無商品"} · 停留 ${stayMinutes(order)} 分鐘${activityLogText(order) ? ` · ${activityLogText(order)}` : ""}</small>
+                        <small>${productSummaryText(order) || "無商品"} · ${completedStayLabel(order)}${activityLogText(order) ? ` · ${activityLogText(order)}` : ""}</small>
                       </button>
-                      <button class="history-delete" data-action="delete-order" data-id="${order.id}">刪除</button>
+                      ${
+                        order.status === "paid"
+                          ? `<button class="history-delete" data-action="void-order" data-id="${order.id}">作廢</button>`
+                          : `<span class="history-delete disabled">已作廢</span>`
+                      }
                     </article>
                   `;
                 })
@@ -2050,21 +2713,143 @@ function renderHistory() {
   `;
 }
 
+function renderDailyClosingPage() {
+  const date = todayKey();
+  const operatingStatus = dailyOperatingStatus(date);
+  const summary = buildDailySummaryForDate(date);
+  const openOrders = openOrdersForDate(date);
+  const closing = officialClosingForDate(date);
+  const outdated = isDailyClosingOutdated(closing);
+  const paymentRows = paymentSummaryRows(summary.paymentSummary);
+  const businessEventSummary = summary.businessEventSummary;
+  const productOptions = sortedProducts().filter((product) => product.active !== false);
+  return `
+    <section class="daily-closing-page">
+      <div class="section-title">
+        <div>
+          <h2>今日結帳</h2>
+          <p>查看與核對今日營業摘要，完成今日結帳快照。</p>
+        </div>
+        <button class="ghost" data-action="floor">返回 POS</button>
+      </div>
+      <section class="daily-status-card ${operatingStatus.key}">
+        <div>
+          <span>今日日期</span>
+          <strong>${date}</strong>
+        </div>
+        <div>
+          <span>今日狀態</span>
+          <strong>${operatingStatus.label}</strong>
+        </div>
+        <div>
+          <span>首筆訂單</span>
+          <strong>${summary.firstOrderAt ? timeLabel(summary.firstOrderAt) : "-"}</strong>
+        </div>
+        <div>
+          <span>末筆結帳</span>
+          <strong>${summary.lastOrderAt ? timeLabel(summary.lastOrderAt) : "-"}</strong>
+        </div>
+      </section>
+      ${
+        closing
+          ? `<section class="closing-result ${outdated ? "outdated" : ""}">
+              <div>
+                <span>${outdated ? "結帳後有異動" : "今日已結帳"}</span>
+                <strong>DailyClosing v${closing.version}</strong>
+                <small>結帳時間：${timeLabel(closing.closedAt)} · 備份：${closing.backupStatus === "downloaded" ? "已下載" : "尚未成功下載"}</small>
+                ${outdated ? `<p>此營業日的資料已在今日結帳後變更，請重新完成今日結帳以更新 official snapshot。</p>` : ""}
+              </div>
+              <div class="closing-actions">
+                <button class="secondary" data-action="redownload-full-backup" data-id="${closing.id}">重新下載完整備份</button>
+                ${outdated ? `<button class="primary" data-action="regenerate-closing" data-date="${date}">重新完成今日結帳</button>` : ""}
+              </div>
+            </section>`
+          : ""
+      }
+      <section class="stats report-stats" aria-label="今日結帳摘要">
+        <article><span>已結帳訂單</span><strong>${summary.orderCount}</strong></article>
+        <article><span>今日營收</span><strong>${money.format(summary.revenue)}</strong></article>
+        <article><span>已知毛利</span><strong>${money.format(summary.profit)}</strong></article>
+        <article><span>未知成本品項</span><strong>${summary.unknownCostQuantity}</strong></article>
+        <article><span>未結帳訂單</span><strong>${summary.openOrderCount}</strong></article>
+      </section>
+      <section class="daily-sections">
+        <article class="daily-section">
+          <h3>付款方式摘要</h3>
+          ${
+            paymentRows.length
+              ? paymentRows.map((row) => `<p><span>${row.label}</span><strong>${row.orderCount} 筆 · ${money.format(row.amount)}</strong></p>`).join("")
+              : `<div class="empty-note">今日尚無已結帳付款紀錄</div>`
+          }
+        </article>
+        <article class="daily-section">
+          <h3>Business Event 摘要</h3>
+          <p><span>採購</span><strong>${money.format(businessEventSummary.purchaseAmount)}</strong></p>
+          <p><span>報廢</span><strong>${money.format(businessEventSummary.wasteCost)}</strong></p>
+          <p><span>自用 / 測試 / 招待</span><strong>${money.format(businessEventSummary.personalCost + businessEventSummary.testCost + businessEventSummary.complimentaryCost)}</strong></p>
+        </article>
+      </section>
+      ${
+        openOrders.length
+          ? `<section class="blocking-panel">
+              <h3>尚不能完成今日結帳</h3>
+              <p>仍有 ${openOrders.length} 筆未結帳訂單，請先回 POS 完成結帳或取消。</p>
+              <div>
+                ${openOrders.map((order) => `<button class="ghost" data-action="select-order" data-id="${order.id}">${orderSeatName(order)} · ${order.people}人 · ${money.format(calculateOrder(order).total)}</button>`).join("")}
+              </div>
+            </section>`
+          : closing
+            ? ""
+            : `<section class="closing-primary-panel">
+              <div>
+                <h3>可以完成今日結帳</h3>
+                <p>完成今日結帳會建立 DailyClosing，並自動下載完整 Full Backup。</p>
+              </div>
+              <button class="primary" data-action="close-store">完成今日結帳</button>
+            </section>`
+      }
+      <section class="late-entry-panel">
+        <div class="section-title compact"><h2>補登訂單</h2></div>
+        <form id="late-entry-form" class="late-entry-form">
+          <label>營業日期<input name="businessDate" type="date" value="${date}" /></label>
+          <label>大約交易時間<input name="approximateTime" type="time" value="12:00" /></label>
+          <label>商品<select name="productId">${productOptions.map((product) => `<option value="${product.id}">${product.name}</option>`).join("")}</select></label>
+          <label>數量<input name="quantity" type="number" min="1" step="1" value="1" /></label>
+          <label>實際收款金額<input name="receivedAmount" type="number" min="1" step="1" /></label>
+          <label>付款方式<select name="paymentMethod"><option value="cash">現金</option><option value="electronic">電子支付</option></select></label>
+          <label>內用 / 外帶<select name="serviceType"><option value="外帶">外帶</option><option value="內用">內用</option></select></label>
+          <label>客源<select name="customerSource">${customerSourceOptions().map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
+          <label>補單原因<select name="correctionReason">${LATE_ENTRY_REASONS.map((reason) => `<option value="${reason}">${reason}</option>`).join("")}</select></label>
+          <label class="wide">備註<input name="note" /></label>
+          <button class="secondary" type="button" data-action="save-late-entry">建立補登訂單</button>
+        </form>
+      </section>
+    </section>
+  `;
+}
+
 function renderBackupPage() {
   const todayOrders = paidOrdersForDate(todayKey());
   const todaySummary = summarizeOrders(todayOrders);
   return `
     <section class="management">
       <div class="section-title">
-        <h2>備份與日結</h2>
+        <h2>資料與設定</h2>
         <button class="ghost" data-action="floor">返回點餐</button>
       </div>
-      <div class="backup-actions">
-        <button class="primary" data-action="export-all">匯出全部資料</button>
-        <button class="secondary" data-action="export-today">匯出今日資料</button>
-        <button class="secondary" data-action="export-closing">結束營業 / 匯出今日報表</button>
-        <button class="secondary" data-action="import-backup">匯入備份</button>
-        <button class="secondary danger-action" data-action="reset-test-orders">清空測試訂單資料</button>
+      <div class="backup-sections">
+        <section class="backup-section">
+          <div>
+            <h3>資料備份與還原</h3>
+            <p>完整備份、匯入還原與測試資料清理。匯入與清空會影響此裝置資料。今日結帳流程請使用獨立的「今日結帳」頁。</p>
+          </div>
+          <div class="backup-actions">
+            <button class="primary" data-action="export-all">匯出全部資料</button>
+            <button class="secondary" data-action="export-today">匯出今日資料</button>
+            <button class="secondary" data-action="import-backup">匯入備份</button>
+            <button class="secondary danger-action" data-action="reset-test-orders">清空測試訂單資料</button>
+          </div>
+        </section>
         <input id="backup-file" type="file" accept="application/json,.json" hidden />
       </div>
       <div class="backup-summary">
@@ -2170,7 +2955,7 @@ function saveBusinessEvent() {
     businessEventItemSource: event.itemSource,
     businessEventProductId: event.productId,
     editingBusinessEventId: null,
-    notice: `${editing ? "已更新" : "已新增"}營運紀錄：${businessEventTypeLabel(event.type)} / ${event.itemName}`
+    notice: `${editing ? "已更新" : "已新增"}營運事件：${businessEventTypeLabel(event.type)} / ${event.itemName}`
   });
 }
 
@@ -2188,7 +2973,8 @@ function renderBusinessEventsPage() {
   const formDate = editing?.date || state.businessEventDate || todayKey();
   const quantityValue = editing?.quantity || 1;
   const itemCategoryValue = editing?.itemCategory ?? selectedProduct?.category ?? "";
-  const unitCostValue = editing?.unitCost ?? (selectedProduct ? Number(selectedProduct.cost) || 0 : "");
+  const selectedProductCost = selectedProduct ? knownUnitCost(selectedProduct.cost) : null;
+  const unitCostValue = editing?.unitCost ?? (selectedProductCost ?? "");
   const amountValue = editing?.amount || "";
   const calculatedCostAmount = unitCostValue ? quantityValue * Number(unitCostValue) : 0;
   const costAmountValue = editing?.costAmount ?? "";
@@ -2196,7 +2982,7 @@ function renderBusinessEventsPage() {
     <section class="business-events-page">
       <div class="section-title">
         <div>
-          <h2>營運紀錄</h2>
+          <h2>營運事件</h2>
           <p>記錄採購、報廢、自用、測試與招待，不影響銷售訂單。</p>
         </div>
         <button class="ghost" data-action="floor">回到 POS</button>
@@ -2308,7 +3094,7 @@ function renderBusinessEventsPage() {
                    <button class="ghost" data-action="edit-business-event" data-id="${event.id}">編輯</button>
                  </div>
                `).join("")}`
-            : `<div class="empty-note">此日期與類型尚無營運紀錄</div>`
+            : `<div class="empty-note">此日期與類型尚無營運事件</div>`
         }
       </div>
     </section>
@@ -2413,7 +3199,8 @@ function renderInventoryLotsPage() {
   const selectedProduct = itemSource === "product"
     ? selectedInventoryLotProduct(state.inventoryLotProductId, lotType)
     : null;
-  const unitCostValue = selectedProduct ? Number(selectedProduct.cost) || 0 : "";
+  const selectedProductCost = selectedProduct ? knownUnitCost(selectedProduct.cost) : null;
+  const unitCostValue = selectedProductCost ?? "";
   const defaultUnit = defaultUnitForLotType(lotType);
   const today = todayKey();
   const rows = filteredInventoryLots();
@@ -2421,7 +3208,7 @@ function renderInventoryLotsPage() {
     <section class="inventory-lots-page">
       <div class="section-title">
         <div>
-          <h2>資源管理</h2>
+          <h2>庫存現況</h2>
           <h3>甜點與熟豆批次</h3>
           <p>第一版只管理甜點與熟豆批次，不會自動扣 POS 銷售或 Business Events。</p>
         </div>
@@ -2569,7 +3356,7 @@ function renderAnalyticsDashboard() {
   const sortButtons = [
     ["quantity", "銷售數量"],
     ["revenue", "營收"],
-    ["profit", "毛利"]
+    ["profit", "已知毛利"]
   ];
 
   return `
@@ -2600,8 +3387,9 @@ function renderAnalyticsDashboard() {
 
       <section class="stats analytics-stats" aria-label="經營分析概覽">
         <article><span>營業額</span><strong>${money.format(overview.revenue)}</strong></article>
-        <article><span>毛利</span><strong>${money.format(overview.profit)}</strong></article>
-        <article><span>毛利率</span><strong>${percent.format(overview.marginRate)}</strong></article>
+        <article><span>已知毛利</span><strong>${money.format(overview.profit)}</strong></article>
+        <article><span>已知毛利率</span><strong>${percent.format(overview.marginRate)}</strong></article>
+        <article><span>未知成本品項</span><strong>${overview.unknownCostQuantity}</strong></article>
         <article><span>訂單數</span><strong>${overview.orderCount}</strong></article>
         <article><span>人數</span><strong>${overview.people}</strong></article>
         <article><span>平均客單價</span><strong>${money.format(overview.averageTicket)}</strong></article>
@@ -2659,7 +3447,7 @@ function renderAnalyticsDashboard() {
           ${
             topProducts.length
               ? `<div class="analytics-table-head">
-                    <span>排名</span><span>商品名稱</span><span>類別</span><span>數量</span><span>營收</span><span>成本</span><span>毛利</span><span>毛利率</span><span>口味 / 規格</span><span>冰 / 熱</span><span>內用 / 外帶</span>
+                    <span>排名</span><span>商品名稱</span><span>類別</span><span>數量</span><span>營收</span><span>已知成本</span><span>已知毛利</span><span>已知毛利率</span><span>口味 / 規格</span><span>冰 / 熱</span><span>內用 / 外帶</span>
                  </div>
                  ${topProducts
                    .map(
@@ -2668,7 +3456,7 @@ function renderAnalyticsDashboard() {
                          <span>${index + 1}</span>
                          <strong>${row.name}</strong>
                          <span>${row.category}</span>
-                         <span>${row.quantity}</span>
+                         <span>${row.quantity}${row.unknownCostQuantity ? `（未知 ${row.unknownCostQuantity}）` : ""}</span>
                          <span>${money.format(row.revenue)}</span>
                          <span>${money.format(row.cost)}</span>
                          <span>${money.format(row.profit)}</span>
@@ -2691,7 +3479,7 @@ function renderAnalyticsDashboard() {
           <div class="analytics-table category-summary-table">
             ${
               categorySummary.length
-                ? `<div class="analytics-table-head"><span>類別</span><span>數量</span><span>營收</span><span>毛利</span><span>毛利率</span></div>
+                ? `<div class="analytics-table-head"><span>類別</span><span>數量</span><span>營收</span><span>已知毛利</span><span>已知毛利率</span></div>
                    ${categorySummary
                      .map(
                        (row) => `
@@ -2771,6 +3559,7 @@ function renderAnalyticsDashboard() {
 
 function renderMain() {
   if (state.activeView === "analytics") return renderAnalyticsDashboard();
+  if (state.activeView === "daily-closing") return renderDailyClosingPage();
   if (state.activeView === "backup") return renderBackupPage();
   if (state.activeView === "business-events") return renderBusinessEventsPage();
   if (state.activeView === "inventory-lots") return renderInventoryLotsPage();
@@ -2780,19 +3569,7 @@ function renderMain() {
     <main class="workspace">
       <section class="floor workspace-floor">
         <div class="section-title workspace-title">
-          <div>
-            <span>Current Store State</span>
-            <h2>Cafe Workspace</h2>
-          </div>
-          <div class="actions">
-            <button class="ghost" data-action="products">商品管理</button>
-            <button class="ghost" data-action="business-events">營運紀錄</button>
-            <button class="ghost" data-action="inventory-lots">資源管理</button>
-            <button class="ghost" data-action="history">銷售紀錄</button>
-            <button class="ghost" data-action="analytics">經營分析</button>
-            <button class="ghost" data-action="backup">備份與日結</button>
-            <button class="ghost danger-action" data-action="undo-checkout">撤銷最後結帳</button>
-          </div>
+          ${renderWorkspaceNav()}
         </div>
         ${renderWorkspaceStatus()}
         ${renderSeats()}
@@ -2852,13 +3629,11 @@ function bindProductButtons() {
 function render() {
   document.querySelector("#app").innerHTML = `
     <div class="shell">
-      ${shouldShowDevBanner() ? `<div class="dev-banner">🟠 開發版本 ${APP_BRANCH}</div>` : ""}
       <header class="topbar">
-        <div><span>YUTU POS</span><h1>Cafe Workspace</h1></div>
+        <div class="topbar-title"><span>YUTU POS</span><h1>POS 工作台</h1><small>接單、點餐與結帳</small></div>
         <div class="store-status">
           <time>${new Date().toLocaleDateString("zh-TW", { month: "long", day: "numeric", weekday: "short" })}</time>
-          <strong>${isStoreClosedToday() ? "今日已關店" : "營業中"}</strong>
-          ${isStoreClosedToday() ? "" : `<button class="close-store-button" data-action="close-store">關店</button>`}
+          <strong>${dailyOperatingStatus(todayKey()).label}</strong>
         </div>
       </header>
       ${state.notice ? `<div class="notice" role="status">${state.notice}</div>` : ""}
@@ -2902,10 +3677,12 @@ document.addEventListener("click", (event) => {
   if (action === "add-linked-seat") addLinkedSeatToOrder();
   if (action === "remove-linked-seat") removeLinkedSeatFromOrder(id);
   if (action === "undo-checkout") undoLastCheckout();
+  if (action === "undo-order-checkout") undoCheckoutOrder(id);
   if (action === "cancel-order") cancelOrder();
   if (action === "edit-paid") editPaidOrder(id);
-  if (action === "delete-order") deleteOrder(id);
+  if (action === "void-order") voidOrder(id);
   if (action === "products") setState({ activeView: "products", editingProductId: null });
+  if (action === "daily-closing") setState({ activeView: "daily-closing" });
   if (action === "business-events") setState({ activeView: "business-events", businessEventDate: state.businessEventDate || todayKey() });
   if (action === "inventory-lots") setState({ activeView: "inventory-lots" });
   if (action === "analytics") setState({ activeView: "analytics" });
@@ -2917,10 +3694,13 @@ document.addEventListener("click", (event) => {
   if (action === "export-all") exportAllData();
   if (action === "export-today") exportTodayData();
   if (action === "export-closing") exportClosingReport();
+  if (action === "redownload-full-backup") downloadFullBackupForClosing(id);
+  if (action === "regenerate-closing") regenerateDailyClosing(button.dataset.date || todayKey());
   if (action === "export-report-date") exportDailyData(state.historyDate || todayKey());
   if (action === "import-backup") document.querySelector("#backup-file")?.click();
   if (action === "reset-test-orders") resetTestOrders();
   if (action === "save-business-event") saveBusinessEvent();
+  if (action === "save-late-entry") saveLateEntry();
   if (action === "save-inventory-lot") saveInventoryLot();
   if (action === "archive-inventory-lot") archiveInventoryLot(id);
   if (action === "edit-business-event") {
@@ -2969,6 +3749,10 @@ document.addEventListener("change", (event) => {
   if (event.target?.id === "backup-file") {
     importBackupFile(event.target.files?.[0]);
     event.target.value = "";
+    return;
+  }
+  if (event.target?.id === "product-category" && state.activeView === "products" && !state.editingProductId) {
+    setState({ selectedCategoryId: event.target.value || categories[0].id });
     return;
   }
   const target = event.target.closest("[data-action]");

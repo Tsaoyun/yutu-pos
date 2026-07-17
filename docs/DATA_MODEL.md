@@ -1,3 +1,61 @@
+# Data Model Addendum: Sprint 1 Daily Operating Workflow
+
+Sprint 1 extends existing records without replacing the order model.
+
+## Order fields added or normalized
+
+```js
+{
+  businessDate,
+  orderedAt,
+  paidAt,
+  entryType,
+  fulfillmentStatus,
+  correctionReason,
+  correctedAt,
+  voidedAt,
+  voidReason,
+  previousStatus,
+  orderNote,
+  updatedAt
+}
+```
+
+Notes:
+
+- `businessDate` is used for daily closing and late-entry calculations.
+- `entryType` defaults to `standard`; late entries use `late_entry`.
+- `fulfillmentStatus` is `completed` for paid and late-entry orders.
+- `status: "voided"` keeps the record visible but excludes it from paid-order totals.
+- `voidedAt` and `voidReason` preserve audit context.
+- `correctionReason` and `correctedAt` track limited paid-order corrections.
+
+## DailyClosing fields added or normalized
+
+```js
+{
+  businessDate,
+  revenue,
+  paymentSummary,
+  customerSourceSummary,
+  businessEventSummary,
+  openOrderCount,
+  snapshotVersion,
+  supersedesId,
+  changeSummary,
+  backupStatus,
+  backupDownloadedAt,
+  createdAt
+}
+```
+
+Notes:
+
+- `dailyClosings` remain snapshots.
+- paid non-voided orders remain the sales source of truth.
+- `backupStatus` can be `downloaded` or `pending`.
+- re-closing creates a new official snapshot and supersedes the older official closing.
+
 # Data Model
 
 本文件描述目前 YUTU POS 存在 localStorage 的主要資料模型。內容以目前程式實作為準；`dailyClosings` 與庫存資料是資料穩定化後新增的模型。
@@ -179,7 +237,7 @@ Phase 3A 已建立 `businessEvents` 的 service / data model foundation：
 
 Phase 3B 已新增最小可用紀錄：
 
-- UI 位置：`營運紀錄` 頁。
+- UI 位置：`營運事件` 頁。
 - 已支援建立 `purchase`、`waste`、`personal`、`test`、`complimentary`。
 - 尚未支援 `production`、`roasting`、`stock_adjustment` 的 UI。
 - Phase 4A 已新增 `inventoryLots` 批次管理 UI；目前仍沒有完整庫存扣減。
@@ -298,6 +356,21 @@ Phase 4A 已建立 `inventoryLots` foundation：
   options
 }
 ```
+
+### Sprint 2B Product Metadata Notes
+
+- Product schema remains flat; Sprint 2B does not introduce nested `capabilities`.
+- `category` remains the historical category id. Existing `beans` data is preserved for compatibility; `signature` is added as an additive category for new signature drinks.
+- Category defaults are defined in code as `CATEGORY_METADATA`; there is no Firestore Category Master in Sprint 2B.
+- `supportsHot`, `supportsIce`, and `iceExtraPrice` are the Product-level ordering metadata used for new order item snapshots.
+- Product-level service mode is not part of the model. Dine-in / takeout remains an Order-level workflow concept.
+- `cost` is `number | null`.
+  - `null` means unknown or not yet estimated.
+  - `0` means the cost is confirmed as zero.
+  - blank Product Editor cost input saves as `null`.
+- `sort` remains an internal number. Product Management sorts by category order, then `sort`, then name; Sprint 2B does not expose drag-and-drop sorting.
+- New order items snapshot `basePrice`, `effectivePrice`, `iceExtra`, `iceExtraPrice`, `cost`, `supportsHot`, and `supportsIce` from the resolved Product metadata.
+- Historical order items keep their existing snapshots; they are not recalculated from current Product records during restore.
 
 ## DailyClosings
 

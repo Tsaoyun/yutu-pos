@@ -2,6 +2,7 @@ export const categories = [
   { id: "espresso", name: "義式" },
   { id: "pourover", name: "手沖" },
   { id: "tea", name: "茶飲" },
+  { id: "signature", name: "特調" },
   { id: "dessert", name: "甜品" },
   { id: "beans", name: "熟豆" }
 ];

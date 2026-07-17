@@ -1,3 +1,18 @@
+# Architecture Addendum: Workspace Navigation
+
+目前 YUTU POS v2 的前台資訊架構維持 `Workspace = Order Queue + Current Order`。POS 工作台處理進行中的 orders；Business Events 處理非訂單營運紀錄，兩者沒有合併成單一事件模型。
+
+首頁導覽採分組式 compact navigation：
+
+- 營業：POS 工作台、訂單歷史、今日結帳
+- 紀錄與庫存：營運事件、庫存現況
+- 管理與分析：商品、經營分析
+- 系統：資料與設定
+
+`資料與設定` 目前仍是單一頁面，但 UI 已分成 `今日結帳／日結` 與 `資料備份與還原` 兩個區塊。這是低風險過渡方案，尚未拆成獨立 route / view。
+
+危險操作不得與一般導覽並列。`撤銷最後結帳` 已從首頁移除，改為訂單歷史中的明確訂單脈絡操作。
+
 # Architecture
 
 本文件是 YUTU POS v2 開發藍圖。內容以目前程式碼與既有 docs 為基礎，區分「目前已實作」與「v2 建議擴充」。目前正式資料仍以 localStorage 為主，Firestore 僅有 adapter 與 schema 草案，尚未接入主流程。
@@ -198,4 +213,4 @@ buildAnalyticsDashboard(orders, {
 - `main.js` 不應繼續承擔所有 v2 邏輯；Phase 1 起應優先把資料語意、normalize、summary、export payload 組裝抽到 services。
 # IA Naming Note
 
-YUTU POS v2 介面命名以現場操作任務為主：`POS 點餐`、`銷售紀錄`、`營運紀錄`、`資源管理`、`經營分析`、`備份與日結`。其中 `資源管理` 目前只代表甜點與熟豆批次；`營運紀錄` 記錄採購、報廢、自用、測試與招待，不影響銷售訂單。
+YUTU POS v2 介面命名以現場操作任務為主：`POS 工作台`、`訂單歷史`、`今日結帳`、`營運事件`、`庫存現況`、`商品`、`經營分析`、`資料與設定`。其中 `庫存現況` 目前只代表甜點與熟豆批次；`營運事件` 記錄採購、報廢、自用、測試與招待，不影響銷售訂單。

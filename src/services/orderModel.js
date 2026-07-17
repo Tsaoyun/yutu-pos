@@ -9,33 +9,26 @@ function createLineId() {
   return `line-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function supportsTemperature(productOrItem) {
-  return Boolean(productOrItem.supportsHot || productOrItem.supportsIce || productOrItem.requiresTemperature);
-}
-
-function defaultTemperature(product, requestedTemperature = "") {
-  if (!supportsTemperature(product)) return "";
-  if (requestedTemperature === "冰" && product.supportsIce !== false) return "冰";
-  if (requestedTemperature === "熱" && product.supportsHot !== false) return "熱";
-  if (product.supportsHot !== false) return "熱";
-  if (product.supportsIce !== false) return "冰";
-  return "";
+export function knownUnitCost(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const cost = Number(value);
+  return Number.isFinite(cost) ? cost : null;
 }
 
 export function priceFieldsForItem(item) {
   const basePrice = Number(item.basePrice ?? item.price ?? item.effectivePrice) || 0;
-  const iceExtra =
-    item.temperature === "冰" && supportsTemperature(item)
-      ? Number(item.iceExtraPrice ?? item.iceExtra ?? 0) || 0
-      : 0;
+  const iceExtraPrice = Number(item.iceExtraPrice ?? item.iceExtra ?? 0) || 0;
+  const iceExtra = item.temperature === "冰" ? iceExtraPrice : 0;
   const effectivePrice = basePrice + iceExtra;
+  const cost = knownUnitCost(item.cost);
 
   return {
     basePrice,
     effectivePrice,
     iceExtra,
+    iceExtraPrice,
     price: effectivePrice,
-    profit: effectivePrice - (Number(item.cost) || 0)
+    profit: cost === null ? null : effectivePrice - cost
   };
 }
 
@@ -47,30 +40,25 @@ export function createOrder({ seatId, people }) {
     createdAt: now.toISOString(),
     seatId,
     people,
-    linkedSeatIds: [],
     items: [],
     activityLog: [],
     status: "open",
     paymentMethod: null,
-    checkedOutAt: null,
-    customerSource: "not_asked",
-    customerSourceNote: ""
+    checkedOutAt: null
   };
 }
 
 export function addOrderItem(order, product, options = {}) {
-  const requiresTemperature = supportsTemperature(product);
-  const requiresServiceType = product.requiresServiceType ?? product.supportsTakeout !== false;
-  const temperature = defaultTemperature(product, options.temperature);
+  const requiresTemperature = product.requiresTemperature ?? product.type === "drink";
+  const requiresServiceType = product.requiresServiceType ?? product.type !== "retail";
+  const temperature = requiresTemperature ? options.temperature || "熱" : "";
   const serviceType = options.serviceType || (order.seatId === "takeout" ? "外帶" : "內用");
   const baseItem = {
     category: product.category,
     temperature,
-    supportsHot: product.supportsHot !== false,
-    supportsIce: product.supportsIce !== false,
-    iceExtraPrice: Number(product.iceExtraPrice) || 0,
     basePrice: product.price,
-    cost: product.cost
+    cost: knownUnitCost(product.cost),
+    iceExtraPrice: Number(product.iceExtraPrice) || 0
   };
   const priceFields = priceFieldsForItem(baseItem);
 
@@ -88,17 +76,16 @@ export function addOrderItem(order, product, options = {}) {
         quantity: 1,
         requiresTemperature,
         requiresServiceType,
-        supportsHot: product.supportsHot !== false,
-        supportsIce: product.supportsIce !== false,
-        supportsTakeout: product.supportsTakeout !== false,
+        supportsHot: product.supportsHot,
+        supportsIce: product.supportsIce,
+        iceExtraPrice: priceFields.iceExtraPrice,
         temperature,
         serviceType: requiresServiceType ? serviceType : "",
-        iceExtraPrice: Number(product.iceExtraPrice) || 0,
         basePrice: priceFields.basePrice,
         effectivePrice: priceFields.effectivePrice,
         iceExtra: priceFields.iceExtra,
         price: priceFields.price,
-        cost: product.cost,
+        cost: baseItem.cost,
         profit: priceFields.profit,
         served: false,
         note: options.note || ""
@@ -130,16 +117,35 @@ export function calculateOrder(order) {
     (summary, item) => {
       const quantity = Number(item.quantity) || 0;
       const price = Number(item.effectivePrice ?? item.price) || 0;
-      const cost = Number(item.cost) || 0;
+      const cost = knownUnitCost(item.cost);
 
       summary.total += price * quantity;
-      summary.cost += cost * quantity;
-      summary.profit += (price - cost) * quantity;
+      if (cost === null) {
+        summary.unknownCostItems += 1;
+        summary.unknownCostQuantity += quantity;
+        summary.unknownCostRevenue += price * quantity;
+      } else {
+        summary.cost += cost * quantity;
+        summary.knownCostRevenue += price * quantity;
+        summary.profit += (price - cost) * quantity;
+      }
       summary.drinks += item.type === "drink" ? quantity : 0;
       summary.desserts += item.type === "dessert" ? quantity : 0;
+      summary.retail += item.type === "retail" ? quantity : 0;
       return summary;
     },
-    { total: 0, cost: 0, profit: 0, drinks: 0, desserts: 0 }
+    {
+      total: 0,
+      cost: 0,
+      profit: 0,
+      knownCostRevenue: 0,
+      unknownCostRevenue: 0,
+      unknownCostItems: 0,
+      unknownCostQuantity: 0,
+      drinks: 0,
+      desserts: 0,
+      retail: 0
+    }
   );
 }
 

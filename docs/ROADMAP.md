@@ -22,9 +22,9 @@
 
 資訊架構命名：
 
-- `歷史` 已整理為 `銷售紀錄`，頁面標題使用 `銷售紀錄 / 日報`。
-- `批次管理` 已整理為 `資源管理`，頁面內標題聚焦 `甜點與熟豆批次`。
-- `備份 / 資料` 已整理為 `備份與日結`。
+- `歷史` 已整理為 `訂單歷史`。
+- `批次管理` 已整理為 `庫存現況`，頁面內標題聚焦 `甜點與熟豆批次`。
+- `備份 / 資料` 已整理為 `資料與設定`，頁內分為 `今日結帳／日結` 與 `資料備份與還原`。
 - Dashboard 的 `Customer Source` 已整理為 `客源分析`。
 
 ## Phase 1: 資料模型基礎
@@ -104,7 +104,7 @@ Phase 3C status: BusinessEvent item source semantics implemented in `feature/bus
 - `state.businessEvents` 預設空陣列，舊資料 normalize 補空陣列。
 - full backup 匯出與 restore 保留 `businessEvents`。
 - analytics 已接入 `businessEventSummary`，Phase 3B Dashboard 顯示最小營運事件摘要。
-- `營運紀錄` 頁可新增 `purchase`、`waste`、`personal`、`test`、`complimentary`。
+- `營運事件` 頁可新增 `purchase`、`waste`、`personal`、`test`、`complimentary`。
 - 事件列表支援日期與 type 篩選。
 - Dashboard 顯示 `purchaseAmount`、`wasteCost`、`personalCost`、`testCost`、`complimentaryCost`。
 - Business Events 支援 `itemSource: product | manual`；`material` 欄位已預留但尚未開 UI。
@@ -144,7 +144,7 @@ Phase 4A status: Resource Management Foundation implemented in `feature/business
 - 新增 `src/services/inventoryLots.js`。
 - 新增 `state.inventoryLots` 與 normalize。
 - full backup / restore 保留 `inventoryLots`，舊備份缺欄位時補空陣列。
-- 新增 `資源管理` 頁，頁面內以 `甜點與熟豆批次` 作為第一版功能區。
+- 新增 `庫存現況` 頁，頁面內以 `甜點與熟豆批次` 作為第一版功能區。
 - 可新增甜點批次與熟豆批次。
 - 可查看批次列表。
 - 可將批次封存為 `archived`，不做刪除。
@@ -243,3 +243,14 @@ Phase 4A status: Resource Management Foundation implemented in `feature/business
 - 薪資、人事、會計總帳。
 - 強制客源填寫。
 
+## Addendum: IA Cleanup Completed
+
+已完成第一階段導覽與命名整理：
+
+- `銷售紀錄` -> `訂單歷史`
+- `營運紀錄` -> `營運事件`
+- `資源管理` -> `庫存現況`
+- 首頁移除全域 `撤銷最後結帳`
+- `資料與設定` 頁內分成 `今日結帳／日結` 與 `資料備份與還原`
+
+尚未拆成獨立 view 的項目：`今日結帳` 與 `資料與設定` 目前仍共用 backup/settings view，只以頁內區塊區分。若後續操作複雜度增加，再考慮拆頁。

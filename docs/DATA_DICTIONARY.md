@@ -1,3 +1,15 @@
+# Data Dictionary Addendum: UI Terms
+
+目前 v2 介面用語：
+
+- `POS 工作台`：首頁與現場操作主入口，包含 Order Queue、座位狀態與 Current Order。
+- `訂單歷史`：paid orders、日報摘要、銷售彙總與訂單明細。
+- `營運事件`：businessEvents，非訂單營運紀錄。
+- `庫存現況`：inventoryLots，第一版為甜點與熟豆批次。
+- `資料與設定`：日結、完整備份、匯入還原與測試資料清理。
+
+舊稱相容：`銷售紀錄` 對應 `訂單歷史`；`營運紀錄` 對應 `營運事件`；`資源管理` 對應 `庫存現況`。
+
 # Data Dictionary
 
 本文件定義 YUTU POS v2 的資料語意。目標是讓後續資料模型、analytics、JSON export 與 Firestore schema 使用同一組命名與規則，避免系統逐步擴充後變成小型 ERP 或出現多個真相來源。
@@ -6,7 +18,7 @@
 
 Phase 3A 狀態：enum 與 normalize / create / summary helper 已放在 `src/services/businessEvents.js`。目前尚未實作 Business Events UI，也尚未由 POS 流程自動建立事件。
 
-Phase 3B 狀態：已新增最小版 `營運紀錄` UI，可手動建立 `purchase`、`waste`、`personal`、`test`、`complimentary`。Phase 4A 已新增 `資源管理` UI，第一版管理 `inventoryLots` 甜點與熟豆批次；`production`、`roasting`、`stock_adjustment` UI 尚未實作。
+Phase 3B 狀態：已新增最小版 `營運事件` UI，可手動建立 `purchase`、`waste`、`personal`、`test`、`complimentary`。Phase 4A 已新增 `庫存現況` UI，第一版管理 `inventoryLots` 甜點與熟豆批次；`production`、`roasting`、`stock_adjustment` UI 尚未實作。
 
 Phase 3C 狀態：Business Events 已支援 `itemSource` 語意。可選 POS 商品自動帶入商品名稱、類別與成本；也可保留 manual 手動輸入。`material` 欄位已預留，但尚未實作 material CRUD 或 UI。
 
@@ -63,7 +75,7 @@ other
 - `waste` / `personal` / `test` / `complimentary` 的 `usageType` 必須與 `type` 對應。
 - `purchase` 的 `usageType` 可為 `null`。
 - `null` 不會自動轉成 `other`。
-- `other` 只保留給真正無法分類的使用情境，目前營運紀錄表單不提供 `other` 選項。
+- `other` 只保留給真正無法分類的使用情境，目前營運事件表單不提供 `other` 選項。
 
 ## customerSource
 
@@ -169,7 +181,7 @@ orders + businessEvents
 Phase 4A 狀態：
 
 - 已新增 `src/services/inventoryLots.js`。
-- 已新增 `資源管理` UI，第一版功能區為 `甜點與熟豆批次`。
+- 已新增 `庫存現況` UI，第一版功能區為 `甜點與熟豆批次`。
 - 只支援建立與查看甜點 / 熟豆批次。
 - 支援 `status: "active"` 與 `status: "archived"`。
 - 尚未接 Business Events 消耗，也不會由 POS 銷售自動扣批次。
@@ -212,4 +224,4 @@ v2 規則：
 - 不要把 legacy inventory 當成 v2 庫存唯一真相來源。
 # IA Naming Note
 
-介面用語以目前 v2 命名為準：`銷售紀錄` 對應 paid orders 與日報；`營運紀錄` 對應 businessEvents；`資源管理` 對應 inventoryLots 的甜點與熟豆批次；`客源分析` 對應 customerSource summary；`備份與日結` 對應 full backup、daily report、daily archive 與 restore。
+介面用語以目前 v2 命名為準：`訂單歷史` 對應 paid orders 與日報；`營運事件` 對應 businessEvents；`庫存現況` 對應 inventoryLots 的甜點與熟豆批次；`客源分析` 對應 customerSource summary；`資料與設定` 對應 full backup、daily report、daily archive 與 restore。

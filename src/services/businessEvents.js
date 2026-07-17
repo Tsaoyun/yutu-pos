@@ -77,7 +77,7 @@ export function businessEventTypeOptions({ formOnly = false } = {}) {
 }
 
 export function businessEventTypeLabel(type) {
-  return BUSINESS_EVENT_TYPE_LABELS[type] || type || "未分類";
+  return BUSINESS_EVENT_TYPE_LABELS[type] || type || "未知事件";
 }
 
 export function createBusinessEvent(input = {}) {
