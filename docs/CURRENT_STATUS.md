@@ -1,3 +1,17 @@
+# Release: YUTU POS v0.9.0 — Product Foundation
+
+Release date: 2026-07-17
+
+This release marks the completed Sprint 2 Product Foundation work:
+
+- Workspace stabilization is included.
+- Product metadata is flat and metadata-driven.
+- `signature` is available as an additive category.
+- Cold surcharge uses Product / order item `iceExtraPrice`.
+- Product cost supports `number | null`.
+- Analytics labels known gross profit and surfaces unknown-cost counts.
+- Backup / restore remains compatible with existing localStorage data.
+
 # Current Status Addendum: Sprint 2B Product Metadata
 
 Implemented in Sprint 2B:

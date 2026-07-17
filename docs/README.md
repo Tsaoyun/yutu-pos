@@ -1,5 +1,11 @@
 # Docs Addendum: Sprint 1 Daily Operating Workflow
 
+Current release: **YUTU POS v0.9.0 — Product Foundation**.
+
+Release notes:
+
+- `RELEASE_NOTES_v0.9.0.md`
+
 Sprint 1 adds the implemented daily operating workflow documentation:
 
 - `DAILY_OPERATING_WORKFLOW.md`: how operating status, today closing, late entry, paid-order corrections, and void work.
